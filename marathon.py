@@ -13,7 +13,7 @@ from toolbox import tb_write_log
 
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "0.1"
+app_version = "0.2"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 log_dir = project_dir / "log"
@@ -21,19 +21,17 @@ state_dir = project_dir / "state"
 reports_dir = project_dir / "reports"
 error_dir = reports_dir / "errors"
 cred_path = res_dir / "cred.env"
+mapping_path = res_dir / "collections.json"
 state_path = state_dir / "marathon.json"
 main_log = log_dir / "marathon.log"
-collections = ("Cintec", "Historiathek", "Katholisches Filmwerk", "Lynxarchive", "Doclights", "DEFA")
-collection_field = "007 Collection PROGRESS"
 identifier_field = "001 Identifier"
 title_field = "014 Title Original"
 clip_id_field = "clip_id"
-# Verify these field paths against the Parquet export before any restore integration.
-hash_fields = ("file_hash", "flow_hash", "files.hash")
+clip_name_field = "clip_name_with_extension"
+hash_field = "hash"
 report_only = True
 auto_report_time = time(9, 0)  # Local machine time
 retry_minutes = 60
-allow_empty_search = False
 queue_names = ("restore", "qc", "transcode")
 columns = ("Kollektion", "Gesamt", "Bereit", "%", "Queue LTO", "Queue QC", "Queue Transcode")
 
@@ -48,60 +46,89 @@ def _prepare() -> None:
         folder.mkdir(parents=True, exist_ok=True)
     if not report_only:
         raise RuntimeError("report_only=False ist noch nicht implementiert; keine Jobs werden erstellt.")
-    if not collections or any(not name.strip() for name in collections):
-        raise ValueError("collections muss nichtleere Kollektionsnamen enthalten.")
-    if len({name.casefold() for name in collections}) != len(collections):
-        raise ValueError("collections enthält doppelte Kollektionsnamen.")
-    if not hash_fields or any(not field for field in hash_fields):
-        raise ValueError("hash_fields muss Metadatenfelder enthalten.")
     if retry_minutes <= 0:
         raise ValueError("retry_minutes muss größer als 0 sein.")
     if any(path != state_path for path in state_dir.glob("*.json")):
         raise RuntimeError("Weitere JSON-Datei in state gefunden; bitte Quelle des Zustands klären.")
+    if not mapping_path.is_file():
+        raise FileNotFoundError(f"Kollektionsmapping fehlt: {mapping_path}")
     if not cred_path.is_file():
         raise FileNotFoundError(f"Lege die Searcher-Zugangskonfiguration unter {cred_path} ab.")
+
+
+def _load_mapping() -> list[dict]:
+    with mapping_path.open(encoding="utf-8") as handle:
+        document = json.load(handle)
+    if not isinstance(document, dict) or document.get("schema_version") != 1:
+        raise ValueError("Unbekanntes Format im Kollektionsmapping.")
+    entries = document.get("collections")
+    if not isinstance(entries, list) or not entries:
+        raise ValueError("Im Kollektionsmapping fehlen Kollektionen.")
+    seen = set()
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError("Jede Kollektion muss ein Objekt sein.")
+        name, expected, filters = (entry.get(key) for key in ("name", "expected_hits", "filters"))
+        if not isinstance(name, str) or not name.strip() or name.casefold() in seen:
+            raise ValueError(f"Ungültiger oder doppelter Kollektionsname: {name!r}")
+        if type(expected) is not int or expected < 0:
+            raise ValueError(f"Ungültige Sollmenge für {name!r}.")
+        if not isinstance(filters, list) or not filters:
+            raise ValueError(f"Suchbedingungen fehlen für {name!r}.")
+        for item in filters:
+            if not isinstance(item, dict) or any(not isinstance(item.get(key), str) or not item[key].strip()
+                                                  for key in ("field", "value")):
+                raise ValueError(f"Ungültige Suchbedingung für {name!r}.")
+        seen.add(name.casefold())
+    return entries
 
 
 def _values(value: str) -> list[str]:
     return [part.strip() for part in value.split("; ") if part.strip()]
 
 
-def _search_clips() -> tuple[list[dict], list[str]]:
+def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str, int]]:
     import searcher
 
     searcher.link("file", cred_path)
-    conditions = []
-    for name in collections:
-        if conditions:
-            conditions.append("or")
-        conditions.append((collection_field, "is", name))
-    fields = tuple(dict.fromkeys((collection_field, identifier_field, title_field, clip_id_field, *hash_fields)))
-    matches, _, error = searcher.find({"name": "Marathon collections",
-                                       "request_fields": tuple(conditions), "return_fields": fields})
-    if error:
-        raise RuntimeError(f"Searcher lieferte nur Teilergebnisse; Zustand unverändert: {error}")
-    if not matches and not allow_empty_search:
-        raise RuntimeError("Keine Suchtreffer. Prüfe Feldnamen und Parquet-Datei; Zustand unverändert.")
-    configured = {name.casefold(): name for name in collections}
-    records, errors = [], []
-    for row in matches:
-        if len(row) != len(fields):
-            raise ValueError("Searcher lieferte eine unerwartete Feldanzahl; Zustand unverändert.")
-        values = dict(zip(fields, row))
-        found = {configured[name.casefold()] for name in _values(values[collection_field])
-                 if name.casefold() in configured}
-        clip_id, identifier, title = (values[field].strip() for field in
-                                      (clip_id_field, identifier_field, title_field))
-        if len(found) != 1 or not all((clip_id, identifier, title)):
-            errors.append(f"Ungültiger Treffer: Clip_ID={clip_id!r}, Kollektion={values[collection_field]!r}, "
-                          f"Identifier={identifier!r}, Titel={title!r}")
-            continue
-        hashes = list(dict.fromkeys(hash for field in hash_fields for hash in _values(values[field])))
-        if not hashes:
-            errors.append(f"Keine Filehashes: Clip_ID={clip_id}, Kollektion={next(iter(found))}")
-        records.append({"clip_id": clip_id, "collection": next(iter(found)),
-                        "identifier": identifier, "title": title, "filehashes": hashes})
-    return records, errors
+    fields = (identifier_field, title_field, clip_id_field, clip_name_field, hash_field)
+    records, errors, hit_counts = [], [], {}
+    for entry in mapping:
+        name = entry["name"]
+        conditions = []
+        for item in entry["filters"]:
+            if conditions:
+                conditions.append("and")
+            conditions.append((item["field"], "is", item["value"]))
+        matches, _, error = searcher.find({"name": name, "request_fields": tuple(conditions),
+                                           "return_fields": fields})
+        if error:
+            raise RuntimeError(f"Suche für {name!r} unvollständig; Zustand unverändert: {error}")
+        hit_counts[name] = len(matches)
+        if len(matches) != entry["expected_hits"]:
+            delta = len(matches) - entry["expected_hits"]
+            errors.append(f"Suchabweichung: {name}: Soll={entry['expected_hits']}, "
+                          f"Ist={len(matches)}, Differenz={delta:+d}; Gesamt im Report bleibt Soll.")
+        for row in matches:
+            if len(row) != len(fields):
+                raise ValueError(f"Searcher lieferte für {name!r} eine unerwartete Feldanzahl.")
+            values = dict(zip(fields, row))
+            clip_id, identifier, title = (values[key].strip() for key in
+                                          (clip_id_field, identifier_field, title_field))
+            clip_names = _values(values[clip_name_field])
+            if not all((clip_id, identifier, title)) or len(clip_names) != 1:
+                errors.append(f"Ungültiger Treffer: Kollektion={name!r}, Clip_ID={clip_id!r}, "
+                              f"Identifier={identifier!r}, Titel={title!r}, "
+                              f"clip_name_with_extension={values[clip_name_field]!r}")
+                continue
+            hashes = list(dict.fromkeys(_values(values[hash_field])))
+            if not hashes:
+                errors.append(f"Keine Flow-Hashes: Kollektion={name!r}, Clip_ID={clip_id}, "
+                              f"Clipname={clip_names[0]!r}")
+            records.append({"clip_id": clip_id, "clip_name_with_extension": clip_names[0],
+                            "collection": name, "identifier": identifier, "title": title,
+                            "filehashes": hashes})
+    return records, errors, hit_counts
 
 
 def _load_state() -> dict:
@@ -118,6 +145,9 @@ def _load_state() -> dict:
             raise ValueError(f"Ungültige Queue/Aktivität für Clip_ID {clip_id!r}; keine Aktualisierung.")
         if item["ready"] and item["queue"] is not None:
             raise ValueError(f"Clip_ID {clip_id!r} ist zugleich bereit und in einer Queue.")
+        if not isinstance(item.get("clip_name_with_extension", ""), str):
+            raise ValueError(f"Ungültiger Clipname für Clip_ID {clip_id!r}.")
+        item.setdefault("clip_name_with_extension", "")
     return state
 
 
@@ -134,11 +164,11 @@ def _reconcile(state: dict, records: list[dict], errors: list[str]) -> dict:
     for clip_id, group in ids.items():
         if len(group) > 1:
             errors.append(f"Clip_ID mehrfach in Suche: {clip_id!r}; alle Treffer übersprungen")
-    seen = set(ids)
     for clip_id, old in state["clips"].items():
-        if clip_id not in seen:
-            old["active"] = False
-            errors.append(f"Abgang (im Zustand behalten): Clip_ID={clip_id}, Kollektion={old['collection']}")
+        if clip_id not in ids:
+            errors.append(f"Im aktuellen Suchlauf nicht gefunden (im Zustand behalten): "
+                          f"Clip_ID={clip_id}, Clipname={old['clip_name_with_extension'] or 'unbekannt'}, "
+                          f"Kollektion={old['collection']}")
         elif any(id(item) in duplicated for item in ids[clip_id]):
             old["active"] = False
     for item in records:
@@ -169,13 +199,12 @@ def _save_state(state: dict) -> None:
             temporary.unlink(missing_ok=True)
 
 
-def _totals(state: dict) -> dict[str, tuple[int, int, int, int, int]]:
-    totals = {name: [0, 0, 0, 0, 0] for name in collections}
+def _totals(state: dict, mapping: list[dict]) -> dict[str, tuple[int, int, int, int, int]]:
+    totals = {entry["name"]: [entry["expected_hits"], 0, 0, 0, 0] for entry in mapping}
     for item in state["clips"].values():
         if not item["active"] or item["collection"] not in totals:
             continue
         row = totals[item["collection"]]
-        row[0] += 1
         row[1] += int(item["ready"])
         if item["queue"] in queue_names:
             row[2 + queue_names.index(item["queue"])] += 1
@@ -233,20 +262,28 @@ def _write_new(path: Path, text: str) -> None:
 
 
 def _report(kind: str) -> Path:
-    records, errors = _search_clips()
+    mapping = _load_mapping()
+    records, errors, _ = _search_clips(mapping)
     state = _reconcile(_load_state(), records, errors)
     previous = _read_previous(_previous(kind))
-    totals = _totals(state)
+    totals = _totals(state, mapping)
+    for collection, (total, ready, *queues) in totals.items():
+        if ready > total or sum(queues) > total:
+            errors.append(f"Zustandsabweichung: {collection}: Soll={total}, Bereit={ready}, "
+                          f"Queues={sum(queues)}; Zustand bitte prüfen.")
     when = datetime.now().astimezone()
     name = f"{kind}_{when.strftime('%Y-%m-%d_%H-%M-%S-%f')}"
     text = _render(kind, when, totals, previous)
+    if errors:
+        text += f"\nHinweis: {len(errors)} Auffälligkeiten; Details: errors/{name}_errors.txt\n"
     _save_state(state)
     path = reports_dir / f"{name}.txt"
     _write_new(path, text)
     if errors:
         _write_new(error_dir / f"{name}_errors.txt", "\n".join(errors) + "\n")
-    _log(f"{kind}-Bericht: {path.name}; {sum(row[0] for row in totals.values())} aktive Clips; "
-         f"{len(errors)} Auffälligkeiten")
+    active_count = sum(item["active"] and item["collection"] in totals for item in state["clips"].values())
+    _log(f"{kind}-Bericht: {path.name}; {active_count} aktive Clips im Zustand; "
+         f"{sum(row[0] for row in totals.values())} Soll; {len(errors)} Auffälligkeiten")
     return path
 
 

@@ -1,12 +1,9 @@
-# Marathon: erster Reporting-Stand
+# Marathon 0.2 — Reporting
 
-Voraussetzungen: Python >= 3.11, Windows für den Searcher-Dateimodus, erreichbares SMB-Metadatenexport-Share. Das Skript selbst verwendet keine HTTP-Verbindung.
+Python >=3.11, TOOLBOX und Searcher (PROGRESS-MAM/ES-Search) installieren. Der Searcher-Dateimodus braucht derzeit Windows und Zugriff auf die Parquet-Datei per SMB. Keine produktiven Jobs oder Dateiverschiebungen: report_only=True; False bricht absichtlich ab.
 
-1. TOOLBOX und Searcher gemäß ihren Projekt-READMEs installieren. Für TOOLBOX muss der EditShare-Paketindex konfiguriert sein.
-2. res/cred.env.example nach res/cred.env kopieren und SMB_HOST sowie gegebenenfalls SMB_USER/SMB_PASSWORD lokal eintragen. Niemals Zugangsdaten ins Repository einchecken.
-3. In marathon.py oben collections, Such-/Hash-Felder und auto_report_time prüfen. Die Namen der Hash-Felder sind mangels Beispielexport noch nicht verifiziert. Fehlende Hashes erscheinen in reports/errors/; vor Restore-Anbindung müssen sie bestätigt werden.
-4. Start: python marathon.py. In der Konsole erzeugt report einen manuellen Bericht; quit beendet. Ein Auto-Bericht entsteht ab 09:00 lokaler Rechnerzeit einmal pro Kalendertag. Einzelläufe: python marathon.py --manual bzw. python marathon.py --auto-once.
+res/cred.env.example nach res/cred.env kopieren und SMB_HOST, bei Bedarf SMB_USER und SMB_PASSWORD eintragen. Keine echten Zugangsdaten, state/, reports/ oder log/ einchecken.
 
-Berichte: reports/manual_*.txt und reports/auto_*.txt mit unabhängigen Deltas. Fehlerlisten: reports/errors/. Einzige Zustands-JSON: state/marathon.json, atomar ersetzt; Clips bleiben bei Abgängen enthalten, sind aber nicht mehr aktiv. Bereit ist zunächst false; nur ein späterer bestätigter Erfolg des Transcode-Workers darf ready=true setzen. Queues beginnen bei 0 und werden anhand des queue-Feldes gezählt.
+res/collections.json enthält die geordnete Liste der Kollektionen, Solltreffer und pro Kollektion exakte Feld-Wert-Filter. Mehrere Filter werden mit AND kombiniert. Pro Report startet jede Suche erneut. Die Solltreffer stehen im Bericht als Gesamt, auch wenn Searcher weniger/mehr findet. Abweichungen landen in reports/errors/ und als Hinweis im Report. Ein im aktuellen Suchlauf fehlender Clip wird nicht aus der einzigen JSON unter state/ entfernt oder deaktiviert. Hashes werden aus dem Searcher-Rückgabefeld hash gesammelt; Clip_ID und clip_name_with_extension stehen beim Clip in der JSON. Fehlende Hashes und unklare Treffer erscheinen in der Fehlerliste.
 
-report_only=True: Es werden keinerlei Worker-Aufträge angelegt oder Dateien verschoben. report_only=False wird absichtlich mit einem Fehler abgewiesen, bis der Worker-Vertrag implementiert ist. Nicht mehrere Marathon-Instanzen gleichzeitig starten. Zugangsdaten, Zustand, Logs und Berichte nicht ins Repository einchecken.
+Start: python marathon.py. Im laufenden Prozess erzeugt report einen manuellen Bericht; quit beendet. Ab auto_report_time (Standard 09:00 Uhr Rechnerzeit) einmal täglich ein Auto-Bericht. Für einen Einmallauf: python marathon.py --manual oder python marathon.py --auto-once. Beide Linien vergleichen nur mit ihrem eigenen Vorgänger. Der Zustand wird atomar ersetzt. Noch keine Worker-Verarbeitung: ready bleibt bei neuen Clips false, alle Queues beginnen mit 0. Nicht mehrere Marathon-Instanzen parallel starten.
