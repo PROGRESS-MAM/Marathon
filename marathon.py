@@ -5,6 +5,8 @@ import os
 import queue
 import tempfile
 import threading
+import unicodedata
+from stat import S_ISREG
 from collections import defaultdict
 from datetime import datetime, time, timedelta
 from pathlib import Path
@@ -13,7 +15,7 @@ from toolbox import tb_write_log
 
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "0.2"
+app_version = "0.3"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 log_dir = project_dir / "log"
@@ -29,11 +31,15 @@ title_field = "014 Title Original"
 clip_id_field = "clip_id"
 clip_name_field = "clip_name_with_extension"
 hash_field = "hash"
+root_path = Path("//10.0.77.11") / "Ablage KI Proxy_1" / "Proxy 10 Mbit" / "DEFA"
+target_path = root_path / "AQC"
+aqc_prefix = ("(c)PROGRESS", "10Mbit")
+aqc_ignored_suffixes = (".tmp", ".part", ".partial", ".json", ".txt")
 report_only = True
 auto_report_time = time(9, 0)  # Local machine time
 retry_minutes = 60
-queue_names = ("restore", "qc", "transcode")
-columns = ("Kollektion", "Gesamt", "Bereit", "%", "Queue LTO", "Queue QC", "Queue Transcode")
+queue_names = ("restore", "transcode", "qc")
+columns = ("Kollektion", "Gesamt", "Bereit", "%", "Queue LTO", "Queue Transcode", "Queue QC")
 
 # --------- FUNC ---------
 def _log(message: str) -> None:
@@ -131,6 +137,11 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
     return records, errors, hit_counts
 
 
+def _empty_transcode() -> dict:
+    return {"phase": None, "analysis_started_at": None, "analysis_finished_at": None,
+            "conversion_started_at": None, "conversion_finished_at": None}
+
+
 def _load_state() -> dict:
     if not state_path.exists():
         return {"schema_version": 1, "clips": {}}
@@ -148,6 +159,16 @@ def _load_state() -> dict:
         if not isinstance(item.get("clip_name_with_extension", ""), str):
             raise ValueError(f"Ungültiger Clipname für Clip_ID {clip_id!r}.")
         item.setdefault("clip_name_with_extension", "")
+        transcode = item.setdefault("transcode", _empty_transcode())
+        if not isinstance(transcode, dict) or transcode.get("phase") not in (None, "analysis", "conversion", "completed"):
+            raise ValueError(f"Ungültige Transcode-Phase für Clip_ID {clip_id!r}.")
+        for key in _empty_transcode():
+            transcode.setdefault(key, None)
+            if key != "phase" and transcode[key] is not None and not isinstance(transcode[key], str):
+                raise ValueError(f"Ungültige Transcode-Zeit für Clip_ID {clip_id!r}.")
+        aqc = item.setdefault("aqc", {"present": False, "filename": None, "matched_by": None, "last_seen_at": None})
+        if not isinstance(aqc, dict) or not isinstance(aqc.get("present"), bool):
+            raise ValueError(f"Ungültiger AQC-Status für Clip_ID {clip_id!r}.")
     return state
 
 
@@ -178,7 +199,10 @@ def _reconcile(state: dict, records: list[dict], errors: list[str]) -> dict:
         old = state["clips"].get(clip_id, {})
         state["clips"][clip_id] = {**old, **item, "active": True,
                                    "ready": old.get("ready", False), "queue": old.get("queue"),
-                                   "status": old.get("status", "new")}
+                                   "status": old.get("status", "new"),
+                                   "transcode": old.get("transcode", _empty_transcode()),
+                                   "aqc": old.get("aqc", {"present": False, "filename": None,
+                                                           "matched_by": None, "last_seen_at": None})}
     state["updated_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
     return state
 
@@ -197,6 +221,72 @@ def _save_state(state: dict) -> None:
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)
+
+
+def _normalize(value: str) -> str:
+    return unicodedata.normalize("NFC", value).strip().casefold()
+
+
+def _scan_aqc(state: dict, mapping: list[dict], errors: list[str]) -> tuple[int, int]:
+    if not target_path.is_dir():
+        raise FileNotFoundError(f"AQC-Verzeichnis nicht erreichbar: {target_path}; Zustand unverändert.")
+    defa_names = {entry["name"] for entry in mapping if any(
+        item["field"].casefold() == "006 source progress" and item["value"].casefold() == "defa"
+        for item in entry["filters"])}
+    index = defaultdict(list)
+    for item in state["clips"].values():
+        if item["active"] and item["collection"] in defa_names and item["identifier"] and item["title"]:
+            index[(_normalize(item["identifier"]), _normalize(item["title"]))].append(item)
+    assigned, unmatched = defaultdict(list), 0
+    try:
+        for path in target_path.iterdir():
+            try:
+                info = path.stat(follow_symlinks=False)
+            except FileNotFoundError:
+                continue  # Files may arrive or disappear during the directory scan.
+            if not S_ISREG(info.st_mode) or path.suffix.casefold() in aqc_ignored_suffixes:
+                continue
+            parts = path.name.split("__", 3)
+            if len(parts) != 4 or tuple(parts[:2]) != aqc_prefix or not parts[2].strip() or not parts[3].strip():
+                errors.append(f"AQC-Dateiname nicht zuordenbar: {path.name!r}")
+                continue
+            if info.st_size == 0:
+                errors.append(f"AQC-Datei noch leer (nicht gezählt): {path.name!r}")
+                continue
+            titles = (parts[3], Path(parts[3]).stem)
+            candidates = {item["clip_id"]: item for title in titles
+                          for item in index.get((_normalize(parts[2]), _normalize(title)), ())}
+            if not candidates:
+                unmatched += 1
+            elif len(candidates) != 1:
+                errors.append(f"AQC-Datei mehrfach zuordenbar: {path.name!r}; "
+                              f"Clip_IDs: {', '.join(candidates)}")
+            else:
+                assigned[next(iter(candidates))].append(path.name)
+    except OSError as exc:
+        raise RuntimeError(f"AQC-Verzeichnis nicht vollständig lesbar: {target_path}; Zustand unverändert.") from exc
+    seen_at = datetime.now().astimezone().isoformat(timespec="seconds")
+    count = 0
+    for clip_id, paths in assigned.items():
+        if len(paths) != 1:
+            errors.append(f"Mehrere AQC-Dateien für Clip_ID {clip_id}: {', '.join(paths)}; nicht neu zugeordnet")
+            continue
+        item = state["clips"][clip_id]
+        item["aqc"] = {"present": True, "filename": paths[0],
+                       "matched_by": "identifier_title", "last_seen_at": seen_at}
+        item["transcode"]["phase"] = "completed"
+        if not item["ready"] and item["queue"] != "qc":
+            item["queue"] = "qc"
+            item["status"] = "waiting_qc"
+        count += 1
+    for clip_id, item in state["clips"].items():
+        if clip_id in assigned:
+            continue
+        if item["aqc"]["present"]:
+            item["aqc"]["present"] = False
+            errors.append(f"Bisherige AQC-Datei nicht mehr gesehen: Clip_ID={clip_id}, "
+                          f"Datei={item['aqc']['filename']!r}; Queue bleibt zur Prüfung erhalten.")
+    return count, unmatched
 
 
 def _totals(state: dict, mapping: list[dict]) -> dict[str, tuple[int, int, int, int, int]]:
@@ -219,17 +309,24 @@ def _previous(kind: str) -> Path | None:
 def _read_previous(path: Path | None) -> dict[str, tuple[int, int, float, int, int, int]]:
     if path is None:
         return {}
-    result = {}
+    result, header = {}, None
     for line in path.read_text(encoding="utf-8").splitlines():
         parts = [part.strip() for part in line.split("|")]
-        if len(parts) != len(columns) or parts[0] in (columns[0], "") or set(parts[0]) == {"-"}:
+        if parts[0] == "Kollektion" and len(parts) == len(columns):
+            if set(parts) != set(columns):
+                raise ValueError(f"Vorgängerbericht {path.name} enthält unbekannte Spalten.")
+            header = parts
             continue
+        if header is None or len(parts) != len(columns) or not parts[0] or set(parts[0]) == {"-"}:
+            continue
+        row = dict(zip(header, parts))
         try:
-            result[parts[0]] = (int(parts[1].split()[0].split("(")[0]),
-                                int(parts[2].split()[0].split("(")[0]),
-                                float(parts[3].split()[0]),
-                                *(int(part.split()[0].split("(")[0]) for part in parts[4:]))
-        except (ValueError, IndexError) as exc:
+            def number(key: str, convert):
+                return convert(row[key].split()[0].split("(")[0])
+            result[parts[0]] = (number("Gesamt", int), number("Bereit", int), number("%", float),
+                                number("Queue LTO", int), number("Queue Transcode", int),
+                                number("Queue QC", int))
+        except (ValueError, IndexError, KeyError) as exc:
             raise ValueError(f"Vorgängerbericht {path.name} ist nicht lesbar; kein neuer Bericht.") from exc
     if not result:
         raise ValueError(f"Vorgängerbericht {path.name} enthält keine vollständige Tabelle; kein neuer Bericht.")
@@ -265,6 +362,7 @@ def _report(kind: str) -> Path:
     mapping = _load_mapping()
     records, errors, _ = _search_clips(mapping)
     state = _reconcile(_load_state(), records, errors)
+    aqc_assigned, aqc_unmatched = _scan_aqc(state, mapping, errors)
     previous = _read_previous(_previous(kind))
     totals = _totals(state, mapping)
     for collection, (total, ready, *queues) in totals.items():
@@ -283,7 +381,8 @@ def _report(kind: str) -> Path:
         _write_new(error_dir / f"{name}_errors.txt", "\n".join(errors) + "\n")
     active_count = sum(item["active"] and item["collection"] in totals for item in state["clips"].values())
     _log(f"{kind}-Bericht: {path.name}; {active_count} aktive Clips im Zustand; "
-         f"{sum(row[0] for row in totals.values())} Soll; {len(errors)} Auffälligkeiten")
+         f"{sum(row[0] for row in totals.values())} Soll; {len(errors)} Auffälligkeiten; "
+         f"AQC zugeordnet: {aqc_assigned}, ohne Metadatenzuordnung: {aqc_unmatched}")
     return path
 
 
