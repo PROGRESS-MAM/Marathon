@@ -11,3 +11,6 @@ Bei jedem Bericht scannt Marathon nur die direkten, nichtleeren Dateien unter ta
 Eine zugeordnete AQC-Datei setzt queue=qc und status=waiting_qc, aber niemals ready=true. Der bestehende running_qc-Status bleibt bei Wiederholung erhalten. report_only=True erstellt keinerlei Auftragsdateien oder Dateiverschiebungen; False bricht weiterhin ab. Sichtbare Queues: Restore, Transcode, QC. Intern enthält jeder Clip transcode.phase (analysis/conversion/completed) und die Zeitfelder der beiden Phasen. Ohne künftige Worker-Rückmeldungen können Analyse- und Umrechnungsdauer noch nicht ermittelt werden. Eigene Transcodes sollen später über Clip_ID-Rückmeldungen zugeordnet werden; aktuell verwendet der AQC-Abgleich auch für sie den Dateinamen.
 
 Der Zustand wird atomar unter state/marathon.json ersetzt. Nicht mehrere Instanzen parallel starten. Vorhandene Berichte mit der alten Spaltenreihenfolge bleiben für Deltas lesbar.
+
+## Fehlerberichte
+Jeder neue Fehlerbericht enthält eine Übersicht mit Meldungszahlen je Fehlertyp. Die Detailmeldungen stehen in Gruppen; kleine Gruppen kommen zuerst, große Blöcke danach. Innerhalb der Gruppen sind die unveränderten Einzelmeldungen alphabetisch geordnet.

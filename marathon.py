@@ -15,7 +15,7 @@ from toolbox import tb_write_log
 
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "0.3"
+app_version = "0.4"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 log_dir = project_dir / "log"
@@ -353,6 +353,25 @@ def _render(kind: str, when: datetime, totals: dict, previous: dict) -> str:
     return f"{app_name} {app_version} | {kind} | {when.isoformat(timespec='seconds')}\n\n" + "\n".join(table) + "\n"
 
 
+def _format_errors(errors: list[str]) -> str:
+    grouped = defaultdict(list)
+    for message in errors:
+        kind = message.partition(":")[0].strip() or "Sonstige"
+        if kind.startswith("Mehrere AQC-Dateien für Clip_ID "):
+            kind = "Mehrere AQC-Dateien für Clip_ID"
+        grouped[kind].append(message)
+    kinds = sorted(grouped, key=lambda kind: (len(grouped[kind]), kind.casefold()))
+    type_label = "Fehlertyp" if len(kinds) == 1 else "Fehlertypen"
+    lines = [f"{app_name} {app_version} | Fehlerbericht",
+             f"Gesamt: {len(errors)} Meldungen in {len(kinds)} {type_label}", "",
+             "Übersicht nach Fehlertyp:"]
+    lines.extend(f"{kind}: {len(grouped[kind])}" for kind in kinds)
+    for kind in kinds:
+        lines.extend(("", f"=== {kind} ({len(grouped[kind])}) ==="))
+        lines.extend(sorted(grouped[kind], key=str.casefold))
+    return "\n".join(lines) + "\n"
+
+
 def _write_new(path: Path, text: str) -> None:
     with path.open("x", encoding="utf-8") as handle:
         handle.write(text)
@@ -378,7 +397,7 @@ def _report(kind: str) -> Path:
     path = reports_dir / f"{name}.txt"
     _write_new(path, text)
     if errors:
-        _write_new(error_dir / f"{name}_errors.txt", "\n".join(errors) + "\n")
+        _write_new(error_dir / f"{name}_errors.txt", _format_errors(errors))
     active_count = sum(item["active"] and item["collection"] in totals for item in state["clips"].values())
     _log(f"{kind}-Bericht: {path.name}; {active_count} aktive Clips im Zustand; "
          f"{sum(row[0] for row in totals.values())} Soll; {len(errors)} Auffälligkeiten; "
