@@ -122,6 +122,7 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
         if error:
             raise RuntimeError(f"API-Suche für {entry['name']!r} unvollständig; Zustand unverändert: {error}")
         hit_counts[entry["name"]] = len(matches)
+        repeated_ids, repeated_rows = set(), 0
         if len(matches) != entry["expected_hits"]:
             delta = len(matches) - entry["expected_hits"]
             errors.append(f"Suchabweichung: {entry['name']}: Soll={entry['expected_hits']}, "
@@ -134,8 +135,16 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
                 raise ValueError(f"API-Suche für {entry['name']!r} lieferte keine gültige Clip-ID: {row!r}.")
             key = (entry["name"], clip_id)
             if key in api_records:
-                raise ValueError(f"Doppelte API-Clip-ID {clip_id!r} in {entry['name']!r}.")
+                repeated_ids.add(clip_id)
+                repeated_rows += 1
+                continue
             api_records.add(key)
+        if repeated_rows:
+            examples = ', '.join(sorted(repeated_ids)[:5])
+            errors.append(f"Mehrfach gelieferte API-Clip-IDs: Kollektion={entry['name']!r}, "
+                          f"API-Trefferzeilen={len(matches)}, eindeutige Clip-IDs={len(matches) - repeated_rows}, "
+                          f"zusätzliche Zeilen={repeated_rows}, betroffene Clip-IDs={len(repeated_ids)} "
+                          f"(Beispiele: {examples}); je Clip-ID nur ein Dateiabgleich.")
 
     if not api_records:
         return [], errors, hit_counts
