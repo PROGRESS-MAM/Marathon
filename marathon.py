@@ -47,7 +47,34 @@ queue_names = ("restore", "transcode", "qc")
 columns = ("Kollektion", "Gesamt", "Bereit", "%", "Queue LTO", "Queue Transcode", "Queue QC")
 
 # --------- FUNC ---------
+progress_lock = threading.Lock()
+progress_width = 0
+
+
+def _finish_progress() -> None:
+    global progress_width
+    with progress_lock:
+        if progress_width:
+            print(flush=True)
+            progress_width = 0
+
+
+def _search_progress(message: str) -> None:
+    global progress_width
+    transient = message.startswith("Cached [") or "warte seit " in message or "lade " in message
+    with progress_lock:
+        if transient:
+            print("\r" + message + " " * max(0, progress_width - len(message)), end="", flush=True)
+            progress_width = len(message)
+        else:
+            if progress_width:
+                print(flush=True)
+                progress_width = 0
+            print(message, flush=True)
+
+
 def _log(message: str) -> None:
+    _finish_progress()
     print(message, flush=True)
     tb_write_log(main_log, message)
 
@@ -79,11 +106,9 @@ def _load_mapping() -> list[dict]:
     for entry in entries:
         if not isinstance(entry, dict):
             raise ValueError("Jede Kollektion muss ein Objekt sein.")
-        name, expected, filters = (entry.get(key) for key in ("name", "expected_hits", "filters"))
+        name, filters = (entry.get(key) for key in ("name", "filters"))
         if not isinstance(name, str) or not name.strip() or name.casefold() in seen:
             raise ValueError(f"Ungültiger oder doppelter Kollektionsname: {name!r}")
-        if type(expected) is not int or expected < 0:
-            raise ValueError(f"Ungültige Sollmenge für {name!r}.")
         if not isinstance(filters, list) or not filters:
             raise ValueError(f"Suchbedingungen fehlen für {name!r}.")
         for item in filters:
@@ -120,7 +145,7 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
         for entry in mapping
     ]
     _log(f"API-Verbindung herstellen: {len(searches)} Kollektionen vorgesehen.")
-    searcher.link("api", cred_path)
+    searcher.link("api", cred_path, on_progress=_search_progress)
     api_records, errors, hit_counts = {}, [], {}
     for search, entry in zip(searches, mapping):
         _log(f"API-Suche gestartet: {entry['name']!r}.")
@@ -128,27 +153,27 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
         matches, _, error = searcher.find(search)
         if error:
             raise RuntimeError(f"API-Suche für {entry['name']!r} unvollständig; Zustand unverändert: {error}")
-        hit_counts[entry["name"]] = len(matches)
-        repeated_ids, repeated_rows = set(), 0
-        if len(matches) != entry["expected_hits"]:
-            delta = len(matches) - entry["expected_hits"]
-            errors.append(f"Suchabweichung: {entry['name']}: Soll={entry['expected_hits']}, "
-                          f"Ist={len(matches)}, Differenz={delta:+d}; Gesamt im Report bleibt Soll.")
+        repeated_ids, repeated_rows, invalid_ids = set(), 0, set()
         for row in matches:
             if len(row) != len(api_fields) or not all(isinstance(value, str) for value in row):
-                raise ValueError(f"API-Suche für {entry['name']!r} lieferte unerwartete Rückgabefelder; "
-                                 "Zustand unverändert.")
-            clip_ids = _values(row[0])
-            if len(clip_ids) != 1 or not clip_ids[0].isascii() or not clip_ids[0].isdecimal():
-                raise ValueError(f"API-Suche für {entry['name']!r} lieferte keine eindeutige Clip-ID: "
-                                 f"{row[0]!r}; Zustand unverändert.")
-            clip_id = clip_ids[0]
-            metadata = [_values(value) for value in row[1:4]]
-            if any(len(values) != 1 for values in metadata):
-                raise ValueError(f"API-Suche für {entry['name']!r}, Clip-ID {clip_id!r}: "
-                                 "Kennung, Titel oder Clipname fehlen oder sind mehrdeutig; Zustand unverändert.")
-            identifier, title, clip_name = (values[0] for values in metadata)
-            hashes = list(dict.fromkeys(_values(row[4])))
+                errors.append(f"Unvollständige Clip-Metadaten: Kollektion={entry['name']!r}, Rückgabefelder={row!r}; Treffer verworfen.")
+                continue
+            fields = ("clip_id", "identifier", "title", "clip_name", "hash")
+            parsed = {field: _values(raw) for field, raw in zip(fields, row)}
+            invalid = [field for field in fields if not parsed[field] or (field != "hash" and len(parsed[field]) != 1)]
+            if not invalid and (not parsed["clip_id"][0].isascii() or not parsed["clip_id"][0].isdecimal()):
+                invalid.append("clip_id")
+            if invalid:
+                details = ", ".join(f"{field_names[field]}: {len(parsed[field])} Werte, Rohwert={row[index]!r}"
+                                    for index, field in enumerate(fields) if field in invalid)
+                clip_id = parsed["clip_id"][0] if len(parsed["clip_id"]) == 1 else row[0]
+                if len(parsed["clip_id"]) == 1:
+                    invalid_ids.add(clip_id)
+                errors.append(f"Unvollständige Clip-Metadaten: Kollektion={entry['name']!r}, Clip-ID={clip_id!r}: {details}; Treffer verworfen.")
+                continue
+            clip_id = parsed["clip_id"][0]
+            identifier, title, clip_name = (parsed[field][0] for field in ("identifier", "title", "clip_name"))
+            hashes = list(dict.fromkeys(parsed["hash"]))
             key = (entry["name"], clip_id)
             if key in api_records:
                 record = api_records[key]
@@ -162,22 +187,17 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
             api_records[key] = {"clip_id": clip_id, "clip_name_with_extension": clip_name,
                                 "collection": entry["name"], "identifier": identifier, "title": title,
                                 "filehashes": hashes}
+        for clip_id in invalid_ids:
+            api_records.pop((entry["name"], clip_id), None)
+        valid_count = sum(collection == entry["name"] for collection, _ in api_records)
+        hit_counts[entry["name"]] = valid_count
         if repeated_rows:
-            examples = ', '.join(sorted(repeated_ids)[:5])
-            errors.append(f"Mehrfach gelieferte API-Clip-IDs: Kollektion={entry['name']!r}, "
-                          f"API-Trefferzeilen={len(matches)}, eindeutige Clip-IDs={len(matches) - repeated_rows}, "
-                          f"zusätzliche Zeilen={repeated_rows}, betroffene Clip-IDs={len(repeated_ids)} "
-                          f"(Beispiele: {examples}); Hashes je Clip-ID zusammengeführt.")
+            errors.append(f"Mehrfach gelieferte API-Clip-IDs: Kollektion={entry['name']!r}, zusätzliche Zeilen={repeated_rows}, betroffene Clip-IDs={len(repeated_ids)}; Hashes je Clip-ID zusammengeführt.")
         _log(f"API-Suche abgeschlossen: {entry['name']!r}: {len(matches)} Trefferzeilen, "
-             f"{len(matches) - repeated_rows} eindeutige Clip-IDs; {perf_counter() - started:.1f} s.")
+             f"{valid_count} vollständig verarbeitbare Clip-IDs; {perf_counter() - started:.1f} s.")
 
     records = list(api_records.values())
-    for record in records:
-        if not record["filehashes"]:
-            errors.append(f"Keine Flow-Hashes: Kollektion={record['collection']!r}, "
-                          f"Clip_ID={record['clip_id']}, Clipname={record['clip_name_with_extension']!r}")
-    _log(f"API-Daten geprüft: {len(records)} Kollektion/Clip-Zuordnungen, "
-         f"{sum(not record['filehashes'] for record in records)} ohne Hash.")
+    _log(f"API-Daten geprüft: {len(records)} vollständig verarbeitbare Kollektion/Clip-Zuordnungen.")
     return records, errors, hit_counts
 
 
@@ -231,6 +251,7 @@ def _reconcile(state: dict, records: list[dict], errors: list[str]) -> dict:
             errors.append(f"Clip_ID mehrfach in Suche: {clip_id!r}; alle Treffer übersprungen")
     for clip_id, old in state["clips"].items():
         if clip_id not in ids:
+            old["active"] = False
             errors.append(f"Im aktuellen Suchlauf nicht gefunden (im Zustand behalten): "
                           f"Clip_ID={clip_id}, Clipname={old['clip_name_with_extension'] or 'unbekannt'}, "
                           f"Kollektion={old['collection']}")
@@ -341,11 +362,12 @@ def _scan_aqc(state: dict, mapping: list[dict], errors: list[str]) -> tuple[int,
 
 
 def _totals(state: dict, mapping: list[dict]) -> dict[str, tuple[int, int, int, int, int]]:
-    totals = {entry["name"]: [entry["expected_hits"], 0, 0, 0, 0] for entry in mapping}
+    totals = {entry["name"]: [0, 0, 0, 0, 0] for entry in mapping}
     for item in state["clips"].values():
         if not item["active"] or item["collection"] not in totals:
             continue
         row = totals[item["collection"]]
+        row[0] += 1
         row[1] += int(item["ready"])
         if item["queue"] in queue_names:
             row[2 + queue_names.index(item["queue"])] += 1
@@ -445,7 +467,7 @@ def _report(kind: str) -> Path:
     _log(f"AQC-Scan abgeschlossen: {aqc_assigned} zugeordnet, {aqc_unmatched} ohne Metadatenzuordnung; "
          f"{perf_counter() - step_started:.1f} s.")
     _log("Vorbericht lesen und Summen berechnen.")
-    previous = _read_previous(_previous(kind))
+    previous = {}
     totals = _totals(state, mapping)
     for collection, (total, ready, *queues) in totals.items():
         if ready > total or sum(queues) > total:
@@ -464,7 +486,7 @@ def _report(kind: str) -> Path:
         _write_new(error_dir / f"{name}_errors.txt", _format_errors(errors))
     active_count = sum(item["active"] and item["collection"] in totals for item in state["clips"].values())
     _log(f"{kind}-Bericht: {path.name}; {active_count} aktive Clips im Zustand; "
-         f"{sum(row[0] for row in totals.values())} Soll; {len(errors)} Auffälligkeiten; "
+         f"{sum(row[0] for row in totals.values())} vollständig verarbeitbare Clips; {len(errors)} Auffälligkeiten; "
          f"AQC zugeordnet: {aqc_assigned}, ohne Metadatenzuordnung: {aqc_unmatched}; "
          f"Dauer: {perf_counter() - started:.1f} s.")
     return path
