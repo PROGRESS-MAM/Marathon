@@ -101,10 +101,9 @@ def _values(value: str) -> list[str]:
 def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str, int]]:
     import searcher
 
-    api_fields = (field_names["clip_id"],)
-    file_fields = (field_names["clip_id"], f"custom_metadata.{field_names['identifier']}",
-                   f"custom_metadata.{field_names['title']}",
-                   f"metadata.{field_names['clip_name']}", field_names["hash"])
+    api_fields = (field_names["clip_id"], f"custom_metadata.{field_names['identifier']}",
+                  f"custom_metadata.{field_names['title']}",
+                  f"metadata.{field_names['clip_name']}", field_names["hash"])
     allowed_filters = {"006 Source PROGRESS", "007 Collection PROGRESS", "101a Genre German"}
     for entry in mapping:
         unknown = {item["field"] for item in entry["filters"]} - allowed_filters
@@ -123,7 +122,7 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
     ]
     _log(f"API-Verbindung herstellen: {len(searches)} Kollektionen vorgesehen.")
     searcher.link("api", cred_path)
-    api_records, errors, hit_counts = set(), [], {}
+    api_records, errors, hit_counts = {}, [], {}
     for search, entry in zip(searches, mapping):
         _log(f"API-Suche gestartet: {entry['name']!r}.")
         started = perf_counter()
@@ -138,87 +137,48 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
                           f"Ist={len(matches)}, Differenz={delta:+d}; Gesamt im Report bleibt Soll.")
         for row in matches:
             if len(row) != len(api_fields) or not all(isinstance(value, str) for value in row):
-                raise ValueError(f"API-Suche für {entry['name']!r} lieferte unerwartete Felder.")
-            clip_id = row[0].strip()
-            if not clip_id.isascii() or not clip_id.isdecimal():
-                raise ValueError(f"API-Suche für {entry['name']!r} lieferte keine gültige Clip-ID: {row!r}.")
+                raise ValueError(f"API-Suche für {entry['name']!r} lieferte unerwartete Rückgabefelder; "
+                                 "Zustand unverändert.")
+            clip_ids = _values(row[0])
+            if len(clip_ids) != 1 or not clip_ids[0].isascii() or not clip_ids[0].isdecimal():
+                raise ValueError(f"API-Suche für {entry['name']!r} lieferte keine eindeutige Clip-ID: "
+                                 f"{row[0]!r}; Zustand unverändert.")
+            clip_id = clip_ids[0]
+            metadata = [_values(value) for value in row[1:4]]
+            if any(len(values) != 1 for values in metadata):
+                raise ValueError(f"API-Suche für {entry['name']!r}, Clip-ID {clip_id!r}: "
+                                 "Kennung, Titel oder Clipname fehlen oder sind mehrdeutig; Zustand unverändert.")
+            identifier, title, clip_name = (values[0] for values in metadata)
+            hashes = list(dict.fromkeys(_values(row[4])))
             key = (entry["name"], clip_id)
             if key in api_records:
+                record = api_records[key]
+                if (record["identifier"], record["title"], record["clip_name_with_extension"]) != (identifier, title, clip_name):
+                    raise ValueError(f"Widersprüchliche API-Daten für Clip-ID {clip_id!r} "
+                                     f"in {entry['name']!r}; Zustand unverändert.")
+                record["filehashes"] = list(dict.fromkeys((*record["filehashes"], *hashes)))
                 repeated_ids.add(clip_id)
                 repeated_rows += 1
                 continue
-            api_records.add(key)
+            api_records[key] = {"clip_id": clip_id, "clip_name_with_extension": clip_name,
+                                "collection": entry["name"], "identifier": identifier, "title": title,
+                                "filehashes": hashes}
         if repeated_rows:
             examples = ', '.join(sorted(repeated_ids)[:5])
             errors.append(f"Mehrfach gelieferte API-Clip-IDs: Kollektion={entry['name']!r}, "
                           f"API-Trefferzeilen={len(matches)}, eindeutige Clip-IDs={len(matches) - repeated_rows}, "
                           f"zusätzliche Zeilen={repeated_rows}, betroffene Clip-IDs={len(repeated_ids)} "
-                          f"(Beispiele: {examples}); je Clip-ID nur ein Dateiabgleich.")
+                          f"(Beispiele: {examples}); Hashes je Clip-ID zusammengeführt.")
         _log(f"API-Suche abgeschlossen: {entry['name']!r}: {len(matches)} Trefferzeilen, "
              f"{len(matches) - repeated_rows} eindeutige Clip-IDs; {perf_counter() - started:.1f} s.")
 
-    if not api_records:
-        return [], errors, hit_counts
-
-    ids = tuple(dict.fromkeys(clip_id for _, clip_id in sorted(api_records)))
-    _log(f"Dateimodus verbinden: {len(ids)} eindeutige Clip-IDs abzugleichen.")
-    searcher.link("file", cred_path)
-    file_search = {
-        "name": "Hashes der API-Clips",
-        "request_fields": ((field_names["clip_id"], "contains", ids),),
-        "return_fields": file_fields,
-    }
-    _log(f"Dateisuche gestartet: {len(ids)} Clip-IDs.")
-    started = perf_counter()
-    matches, _, error = searcher.find(file_search)
-    if error:
-        raise RuntimeError(f"Dateisuche für Clip-Hashes unvollständig; Zustand unverändert: {error}")
-    _log(f"Dateisuche abgeschlossen: {len(matches)} Dateitreffer; {perf_counter() - started:.1f} s. "
-         "Metadaten und Hashes werden abgeglichen.")
-
-    by_id = defaultdict(list)
-    for collection, clip_id in sorted(api_records):
-        by_id[clip_id].append(collection)
-    records, found = [], set()
-    for row in matches:
-        if len(row) != len(file_fields) or not all(isinstance(value, str) for value in row):
-            raise ValueError("Dateisuche lieferte unerwartete Felder.")
-        file_ids = set(_values(row[0]))
-        matched_ids = file_ids & by_id.keys()
-        if not matched_ids:
-            continue
-        if len(file_ids) != 1:
-            raise ValueError(f"Dateitreffer passt zu mehreren Clip-IDs: {sorted(file_ids)}; "
-                             "keine Aktualisierung.")
-        clip_id = matched_ids.pop()
-        identifiers, titles = _values(row[1]), _values(row[2])
-        if len(identifiers) != 1 or len(titles) != 1:
-            raise ValueError(f"Dateitreffer für Clip-ID {clip_id!r} hat keine eindeutige Kennung "
-                             "oder keinen Titel; keine Aktualisierung.")
-        identifier, title = identifiers[0], titles[0]
-        clip_names = _values(row[3])
-        if len(clip_names) != 1:
-            raise ValueError(f"Dateitreffer für Clip-ID {clip_id!r} hat keinen "
-                             "eindeutigen Clipnamen; keine Aktualisierung.")
-        hashes = list(dict.fromkeys(_values(row[4])))
-        for collection in by_id[clip_id]:
-            key = (collection, clip_id)
-            if key in found:
-                raise ValueError(f"Mehrere Dateitreffer für Clip-ID {clip_id!r} in {collection!r}.")
-            found.add(key)
-            if not hashes:
-                errors.append(f"Keine Flow-Hashes: Kollektion={collection!r}, Clip_ID={clip_id}, "
-                              f"Clipname={clip_names[0]!r}")
-            records.append({"clip_id": clip_id, "clip_name_with_extension": clip_names[0],
-                            "collection": collection, "identifier": identifier, "title": title,
-                            "filehashes": hashes})
-    missing = api_records - found
-    if missing:
-        example = ', '.join(f"{collection}: {clip_id}" for collection, clip_id in sorted(missing)[:5])
-        raise RuntimeError(f"Für {len(missing)} API-Clips fehlt der passende Dateitreffer "
-                           f"(Beispiele: {example}); Zustand unverändert.")
-    _log(f"Dateiabgleich abgeschlossen: {len(found)} Kollektion/Clip-Zuordnungen, "
-         f"{sum(not item['filehashes'] for item in records)} ohne Hash.")
+    records = list(api_records.values())
+    for record in records:
+        if not record["filehashes"]:
+            errors.append(f"Keine Flow-Hashes: Kollektion={record['collection']!r}, "
+                          f"Clip_ID={record['clip_id']}, Clipname={record['clip_name_with_extension']!r}")
+    _log(f"API-Daten geprüft: {len(records)} Kollektion/Clip-Zuordnungen, "
+         f"{sum(not record['filehashes'] for record in records)} ohne Hash.")
     return records, errors, hit_counts
 
 
