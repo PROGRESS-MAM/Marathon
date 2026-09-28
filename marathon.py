@@ -101,9 +101,8 @@ def _values(value: str) -> list[str]:
 def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str, int]]:
     import searcher
 
-    api_fields = (field_names["clip_id"], f"custom_metadata.{field_names['identifier']}",
-                  f"custom_metadata.{field_names['title']}",
-                  f"metadata.{field_names['clip_name']}", field_names["hash"])
+    api_fields = (field_names["clip_id"], field_names["identifier"],
+                  field_names["title"], field_names["clip_name"], field_names["hash"])
     allowed_filters = {"006 Source PROGRESS", "007 Collection PROGRESS", "101a Genre German"}
     for entry in mapping:
         unknown = {item["field"] for item in entry["filters"]} - allowed_filters
