@@ -15,7 +15,7 @@ from toolbox import tb_write_log
 
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "0.4"
+app_version = "0.5"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 log_dir = project_dir / "log"
@@ -96,44 +96,101 @@ def _values(value: str) -> list[str]:
 def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str, int]]:
     import searcher
 
-    searcher.link("file", cred_path)
-    fields = (identifier_field, title_field, clip_id_field, clip_name_field, hash_field)
-    records, errors, hit_counts = [], [], {}
+    api_id_field = "122 ClipID"
+    api_fields = (api_id_field, identifier_field, title_field)
+    file_fields = (clip_id_field, f"custom_metadata.{identifier_field}",
+                   f"custom_metadata.{title_field}", f"metadata.{clip_name_field}", hash_field)
+    allowed_filters = {"006 Source PROGRESS", "007 Collection PROGRESS", "101a Genre German"}
     for entry in mapping:
-        name = entry["name"]
-        conditions = []
-        for item in entry["filters"]:
-            if conditions:
-                conditions.append("and")
-            conditions.append((item["field"], "is", item["value"]))
-        matches, _, error = searcher.find({"name": name, "request_fields": tuple(conditions),
-                                           "return_fields": fields})
+        unknown = {item["field"] for item in entry["filters"]} - allowed_filters
+        if unknown:
+            raise ValueError(f"API-Suchfeld in {entry['name']!r} nicht geprüft: {', '.join(sorted(unknown))}.")
+
+    searches = [
+        {
+            "name": entry["name"],
+            "request_fields": tuple(part for index, item in enumerate(entry["filters"])
+                                    for part in (("and",) if index else ()) +
+                                    ((item["field"], "is", item["value"]),)),
+            "return_fields": api_fields,
+        }
+        for entry in mapping
+    ]
+    searcher.link("api", cred_path)
+    api_records, errors, hit_counts = {}, [], {}
+    for search, entry in zip(searches, mapping):
+        matches, _, error = searcher.find(search)
         if error:
-            raise RuntimeError(f"Suche für {name!r} unvollständig; Zustand unverändert: {error}")
-        hit_counts[name] = len(matches)
+            raise RuntimeError(f"API-Suche für {entry['name']!r} unvollständig; Zustand unverändert: {error}")
+        hit_counts[entry["name"]] = len(matches)
         if len(matches) != entry["expected_hits"]:
             delta = len(matches) - entry["expected_hits"]
-            errors.append(f"Suchabweichung: {name}: Soll={entry['expected_hits']}, "
+            errors.append(f"Suchabweichung: {entry['name']}: Soll={entry['expected_hits']}, "
                           f"Ist={len(matches)}, Differenz={delta:+d}; Gesamt im Report bleibt Soll.")
         for row in matches:
-            if len(row) != len(fields):
-                raise ValueError(f"Searcher lieferte für {name!r} eine unerwartete Feldanzahl.")
-            values = dict(zip(fields, row))
-            clip_id, identifier, title = (values[key].strip() for key in
-                                          (clip_id_field, identifier_field, title_field))
-            clip_names = _values(values[clip_name_field])
-            if not all((clip_id, identifier, title)) or len(clip_names) != 1:
-                errors.append(f"Ungültiger Treffer: Kollektion={name!r}, Clip_ID={clip_id!r}, "
-                              f"Identifier={identifier!r}, Titel={title!r}, "
-                              f"clip_name_with_extension={values[clip_name_field]!r}")
-                continue
-            hashes = list(dict.fromkeys(_values(values[hash_field])))
+            if len(row) != len(api_fields) or not all(isinstance(value, str) for value in row):
+                raise ValueError(f"API-Suche für {entry['name']!r} lieferte unerwartete Felder.")
+            clip_id, identifier, title = (value.strip() for value in row)
+            if not clip_id.isascii() or not clip_id.isdecimal() or not identifier or not title:
+                raise ValueError(f"API-Suche für {entry['name']!r} lieferte keine eindeutige "
+                                 f"Clip-ID, Kennung oder Titel: {row!r}.")
+            key = (entry["name"], clip_id)
+            if key in api_records:
+                raise ValueError(f"Doppelte API-Clip-ID {clip_id!r} in {entry['name']!r}.")
+            api_records[key] = (identifier, title)
+
+    if not api_records:
+        return [], errors, hit_counts
+
+    searcher.link("file", cred_path)
+    ids = tuple(dict.fromkeys(clip_id for _, clip_id in api_records))
+    file_search = {
+        "name": "Hashes der API-Clips",
+        "request_fields": ((clip_id_field, "contains", ids),),
+        "return_fields": file_fields,
+    }
+    matches, _, error = searcher.find(file_search)
+    if error:
+        raise RuntimeError(f"Dateisuche für Clip-Hashes unvollständig; Zustand unverändert: {error}")
+
+    by_id = defaultdict(list)
+    for (collection, clip_id), (identifier, title) in api_records.items():
+        by_id[clip_id].append((collection, identifier, title))
+    records, found = [], set()
+    for row in matches:
+        if len(row) != len(file_fields) or not all(isinstance(value, str) for value in row):
+            raise ValueError("Dateisuche lieferte unerwartete Felder.")
+        file_ids = set(_values(row[0]))
+        identifier, title = row[1].strip(), row[2].strip()
+        candidates = [(collection, clip_id) for clip_id in file_ids & by_id.keys()
+                      for collection, api_identifier, api_title in by_id[clip_id]
+                      if identifier == api_identifier and title == api_title]
+        if not candidates:
+            continue
+        if len({clip_id for _, clip_id in candidates}) != 1:
+            raise ValueError(f"Dateitreffer mit Kennung {identifier!r} und Titel {title!r} "
+                             "passt zu mehreren API-Clip-IDs; keine Aktualisierung.")
+        clip_names = _values(row[3])
+        if len(clip_names) != 1:
+            raise ValueError(f"Dateitreffer für Clip-ID {candidates[0][1]!r} hat keinen "
+                             "eindeutigen Clipnamen; keine Aktualisierung.")
+        hashes = list(dict.fromkeys(_values(row[4])))
+        for collection, clip_id in candidates:
+            key = (collection, clip_id)
+            if key in found:
+                raise ValueError(f"Mehrere Dateitreffer für Clip-ID {clip_id!r} in {collection!r}.")
+            found.add(key)
             if not hashes:
-                errors.append(f"Keine Flow-Hashes: Kollektion={name!r}, Clip_ID={clip_id}, "
+                errors.append(f"Keine Flow-Hashes: Kollektion={collection!r}, Clip_ID={clip_id}, "
                               f"Clipname={clip_names[0]!r}")
             records.append({"clip_id": clip_id, "clip_name_with_extension": clip_names[0],
-                            "collection": name, "identifier": identifier, "title": title,
+                            "collection": collection, "identifier": identifier, "title": title,
                             "filehashes": hashes})
+    missing = api_records.keys() - found
+    if missing:
+        example = ', '.join(f"{collection}: {clip_id}" for collection, clip_id in sorted(missing)[:5])
+        raise RuntimeError(f"Für {len(missing)} API-Clips fehlt der passende Dateitreffer "
+                           f"(Beispiele: {example}); Zustand unverändert.")
     return records, errors, hit_counts
 
 
