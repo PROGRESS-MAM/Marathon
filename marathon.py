@@ -10,8 +10,18 @@ from stat import S_ISREG
 from collections import defaultdict
 from datetime import datetime, time, timedelta
 from pathlib import Path
+from time import perf_counter
 
 from toolbox import tb_write_log
+
+# --------- STATIC ---------
+field_names = {
+    "identifier": "001 Identifier",
+    "title": "014 Title Original",
+    "clip_id": "clip_id",
+    "clip_name": "clip_name_with_extension",
+    "hash": "hash",
+}
 
 # --------- CONFIG ---------
 app_name = "Marathon"
@@ -26,11 +36,6 @@ cred_path = res_dir / "cred.env"
 mapping_path = res_dir / "collections.json"
 state_path = state_dir / "marathon.json"
 main_log = log_dir / "marathon.log"
-identifier_field = "001 Identifier"
-title_field = "014 Title Original"
-clip_id_field = "clip_id"
-clip_name_field = "clip_name_with_extension"
-hash_field = "hash"
 root_path = Path("//10.0.77.11") / "Ablage KI Proxy_1" / "Proxy 10 Mbit" / "DEFA"
 target_path = root_path / "AQC"
 aqc_prefix = ("(c)PROGRESS", "10Mbit")
@@ -96,9 +101,10 @@ def _values(value: str) -> list[str]:
 def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str, int]]:
     import searcher
 
-    api_fields = (clip_id_field,)
-    file_fields = (clip_id_field, f"custom_metadata.{identifier_field}",
-                   f"custom_metadata.{title_field}", f"metadata.{clip_name_field}", hash_field)
+    api_fields = (field_names["clip_id"],)
+    file_fields = (field_names["clip_id"], f"custom_metadata.{field_names['identifier']}",
+                   f"custom_metadata.{field_names['title']}",
+                   f"metadata.{field_names['clip_name']}", field_names["hash"])
     allowed_filters = {"006 Source PROGRESS", "007 Collection PROGRESS", "101a Genre German"}
     for entry in mapping:
         unknown = {item["field"] for item in entry["filters"]} - allowed_filters
@@ -115,9 +121,12 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
         }
         for entry in mapping
     ]
+    _log(f"API-Verbindung herstellen: {len(searches)} Kollektionen vorgesehen.")
     searcher.link("api", cred_path)
     api_records, errors, hit_counts = set(), [], {}
     for search, entry in zip(searches, mapping):
+        _log(f"API-Suche gestartet: {entry['name']!r}.")
+        started = perf_counter()
         matches, _, error = searcher.find(search)
         if error:
             raise RuntimeError(f"API-Suche für {entry['name']!r} unvollständig; Zustand unverändert: {error}")
@@ -145,20 +154,27 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
                           f"API-Trefferzeilen={len(matches)}, eindeutige Clip-IDs={len(matches) - repeated_rows}, "
                           f"zusätzliche Zeilen={repeated_rows}, betroffene Clip-IDs={len(repeated_ids)} "
                           f"(Beispiele: {examples}); je Clip-ID nur ein Dateiabgleich.")
+        _log(f"API-Suche abgeschlossen: {entry['name']!r}: {len(matches)} Trefferzeilen, "
+             f"{len(matches) - repeated_rows} eindeutige Clip-IDs; {perf_counter() - started:.1f} s.")
 
     if not api_records:
         return [], errors, hit_counts
 
-    searcher.link("file", cred_path)
     ids = tuple(dict.fromkeys(clip_id for _, clip_id in sorted(api_records)))
+    _log(f"Dateimodus verbinden: {len(ids)} eindeutige Clip-IDs abzugleichen.")
+    searcher.link("file", cred_path)
     file_search = {
         "name": "Hashes der API-Clips",
-        "request_fields": ((clip_id_field, "contains", ids),),
+        "request_fields": ((field_names["clip_id"], "contains", ids),),
         "return_fields": file_fields,
     }
+    _log(f"Dateisuche gestartet: {len(ids)} Clip-IDs.")
+    started = perf_counter()
     matches, _, error = searcher.find(file_search)
     if error:
         raise RuntimeError(f"Dateisuche für Clip-Hashes unvollständig; Zustand unverändert: {error}")
+    _log(f"Dateisuche abgeschlossen: {len(matches)} Dateitreffer; {perf_counter() - started:.1f} s. "
+         "Metadaten und Hashes werden abgeglichen.")
 
     by_id = defaultdict(list)
     for collection, clip_id in sorted(api_records):
@@ -201,6 +217,8 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
         example = ', '.join(f"{collection}: {clip_id}" for collection, clip_id in sorted(missing)[:5])
         raise RuntimeError(f"Für {len(missing)} API-Clips fehlt der passende Dateitreffer "
                            f"(Beispiele: {example}); Zustand unverändert.")
+    _log(f"Dateiabgleich abgeschlossen: {len(found)} Kollektion/Clip-Zuordnungen, "
+         f"{sum(not item['filehashes'] for item in records)} ohne Hash.")
     return records, errors, hit_counts
 
 
@@ -305,8 +323,14 @@ def _scan_aqc(state: dict, mapping: list[dict], errors: list[str]) -> tuple[int,
         if item["active"] and item["collection"] in defa_names and item["identifier"] and item["title"]:
             index[(_normalize(item["identifier"]), _normalize(item["title"]))].append(item)
     assigned, unmatched = defaultdict(list), 0
+    checked, last_progress = 0, perf_counter()
     try:
         for path in target_path.iterdir():
+            checked += 1
+            now = perf_counter()
+            if now - last_progress >= 30:
+                _log(f"AQC-Scan läuft: {checked} Verzeichniseinträge erfasst.")
+                last_progress = now
             try:
                 info = path.stat(follow_symlinks=False)
             except FileNotFoundError:
@@ -332,6 +356,7 @@ def _scan_aqc(state: dict, mapping: list[dict], errors: list[str]) -> tuple[int,
                 assigned[next(iter(candidates))].append(path.name)
     except OSError as exc:
         raise RuntimeError(f"AQC-Verzeichnis nicht vollständig lesbar: {target_path}; Zustand unverändert.") from exc
+    _log(f"AQC-Verzeichnis geprüft: {checked} Einträge erfasst.")
     seen_at = datetime.now().astimezone().isoformat(timespec="seconds")
     count = 0
     for clip_id, paths in assigned.items():
@@ -445,10 +470,22 @@ def _write_new(path: Path, text: str) -> None:
 
 
 def _report(kind: str) -> Path:
+    started = perf_counter()
+    _log(f"{kind}-Bericht gestartet: Kollektionsmapping laden.")
     mapping = _load_mapping()
+    _log(f"Kollektionsmapping geladen: {len(mapping)} Kollektionen.")
     records, errors, _ = _search_clips(mapping)
+    _log(f"Zustandsabgleich gestartet: {len(records)} Kollektions-/Clip-Zuordnungen.")
+    step_started = perf_counter()
     state = _reconcile(_load_state(), records, errors)
+    _log(f"Zustandsabgleich abgeschlossen: {len(state['clips'])} Clips im Zustand; "
+         f"{perf_counter() - step_started:.1f} s.")
+    _log("AQC-Scan gestartet.")
+    step_started = perf_counter()
     aqc_assigned, aqc_unmatched = _scan_aqc(state, mapping, errors)
+    _log(f"AQC-Scan abgeschlossen: {aqc_assigned} zugeordnet, {aqc_unmatched} ohne Metadatenzuordnung; "
+         f"{perf_counter() - step_started:.1f} s.")
+    _log("Vorbericht lesen und Summen berechnen.")
     previous = _read_previous(_previous(kind))
     totals = _totals(state, mapping)
     for collection, (total, ready, *queues) in totals.items():
@@ -460,6 +497,7 @@ def _report(kind: str) -> Path:
     text = _render(kind, when, totals, previous)
     if errors:
         text += f"\nHinweis: {len(errors)} Auffälligkeiten; Details: errors/{name}_errors.txt\n"
+    _log(f"Bericht vorbereitet: {len(errors)} Auffälligkeiten. Zustand speichern und Bericht schreiben.")
     _save_state(state)
     path = reports_dir / f"{name}.txt"
     _write_new(path, text)
@@ -468,7 +506,8 @@ def _report(kind: str) -> Path:
     active_count = sum(item["active"] and item["collection"] in totals for item in state["clips"].values())
     _log(f"{kind}-Bericht: {path.name}; {active_count} aktive Clips im Zustand; "
          f"{sum(row[0] for row in totals.values())} Soll; {len(errors)} Auffälligkeiten; "
-         f"AQC zugeordnet: {aqc_assigned}, ohne Metadatenzuordnung: {aqc_unmatched}")
+         f"AQC zugeordnet: {aqc_assigned}, ohne Metadatenzuordnung: {aqc_unmatched}; "
+         f"Dauer: {perf_counter() - started:.1f} s.")
     return path
 
 
