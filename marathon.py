@@ -21,6 +21,7 @@ field_names = {
     "clip_id": "clip_id",
     "clip_name": "clip_name_with_extension",
     "hash": "hash",
+    "status_flags": "status_flags",
 }
 
 # --------- CONFIG ---------
@@ -123,11 +124,17 @@ def _values(value: str) -> list[str]:
     return [part.strip() for part in value.split("; ") if part.strip()]
 
 
-def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str, int]]:
+def _excluded_issue(errors: list[str], excluded_errors: list[str], message: str) -> None:
+    errors.append(message)
+    excluded_errors.append(message)
+
+
+def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str, int], set[str], list[str], int]:
     import searcher
 
     api_fields = (field_names["clip_id"], field_names["identifier"],
-                  field_names["title"], field_names["clip_name"], field_names["hash"])
+                  field_names["title"], field_names["clip_name"], field_names["hash"],
+                  field_names["status_flags"])
     allowed_filters = {"006 Source PROGRESS", "007 Collection PROGRESS", "101a Genre German"}
     for entry in mapping:
         unknown = {item["field"] for item in entry["filters"]} - allowed_filters
@@ -146,7 +153,8 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
     ]
     _log(f"API-Verbindung herstellen: {len(searches)} Kollektionen vorgesehen.")
     searcher.link("api", cred_path, on_progress=_search_progress)
-    api_records, errors, hit_counts = {}, [], {}
+    api_records, errors, hit_counts, placeholder_ids, excluded_errors = {}, [], {}, set(), []
+    placeholder_rows_total = 0
     for search, entry in zip(searches, mapping):
         _log(f"API-Suche gestartet: {entry['name']!r}.")
         started = perf_counter()
@@ -154,12 +162,19 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
         if error:
             raise RuntimeError(f"API-Suche für {entry['name']!r} unvollständig; Zustand unverändert: {error}")
         repeated_ids, repeated_rows, invalid_ids = set(), 0, set()
+        placeholder_rows = 0
         for row in matches:
             if len(row) != len(api_fields) or not all(isinstance(value, str) for value in row):
-                errors.append(f"Unvollständige Clip-Metadaten: Kollektion={entry['name']!r}, Rückgabefelder={row!r}; Treffer verworfen.")
+                _excluded_issue(errors, excluded_errors, f"Unvollständige Clip-Metadaten: Kollektion={entry['name']!r}, Rückgabefelder={row!r}; Treffer verworfen.")
+                continue
+            if "placeholder" in (flag.casefold() for flag in _values(row[-1])):
+                placeholder_rows += 1
+                ids = _values(row[0])
+                if len(ids) == 1 and ids[0].isascii() and ids[0].isdecimal():
+                    placeholder_ids.add(ids[0])
                 continue
             fields = ("clip_id", "identifier", "title", "clip_name", "hash")
-            parsed = {field: _values(raw) for field, raw in zip(fields, row)}
+            parsed = {field: _values(raw) for field, raw in zip(fields, row[:-1])}
             invalid = [field for field in fields if not parsed[field] or (field != "hash" and len(parsed[field]) != 1)]
             if not invalid and (not parsed["clip_id"][0].isascii() or not parsed["clip_id"][0].isdecimal()):
                 invalid.append("clip_id")
@@ -169,7 +184,7 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
                 clip_id = parsed["clip_id"][0] if len(parsed["clip_id"]) == 1 else row[0]
                 if len(parsed["clip_id"]) == 1:
                     invalid_ids.add(clip_id)
-                errors.append(f"Unvollständige Clip-Metadaten: Kollektion={entry['name']!r}, Clip-ID={clip_id!r}: {details}; Treffer verworfen.")
+                _excluded_issue(errors, excluded_errors, f"Unvollständige Clip-Metadaten: Kollektion={entry['name']!r}, Clip-ID={clip_id!r}: {details}; Treffer verworfen.")
                 continue
             clip_id = parsed["clip_id"][0]
             identifier, title, clip_name = (parsed[field][0] for field in ("identifier", "title", "clip_name"))
@@ -187,18 +202,20 @@ def _search_clips(mapping: list[dict]) -> tuple[list[dict], list[str], dict[str,
             api_records[key] = {"clip_id": clip_id, "clip_name_with_extension": clip_name,
                                 "collection": entry["name"], "identifier": identifier, "title": title,
                                 "filehashes": hashes}
-        for clip_id in invalid_ids:
+        placeholder_rows_total += placeholder_rows
+        for clip_id in invalid_ids | placeholder_ids:
             api_records.pop((entry["name"], clip_id), None)
         valid_count = sum(collection == entry["name"] for collection, _ in api_records)
         hit_counts[entry["name"]] = valid_count
         if repeated_rows:
             errors.append(f"Mehrfach gelieferte API-Clip-IDs: Kollektion={entry['name']!r}, zusätzliche Zeilen={repeated_rows}, betroffene Clip-IDs={len(repeated_ids)}; Hashes je Clip-ID zusammengeführt.")
         _log(f"API-Suche abgeschlossen: {entry['name']!r}: {len(matches)} Trefferzeilen, "
-             f"{valid_count} vollständig verarbeitbare Clip-IDs; {perf_counter() - started:.1f} s.")
+             f"{placeholder_rows} Platzhalter übersprungen, {valid_count} vollständig verarbeitbare Clip-IDs; "
+             f"{perf_counter() - started:.1f} s.")
 
-    records = list(api_records.values())
+    records = [item for item in api_records.values() if item["clip_id"] not in placeholder_ids]
     _log(f"API-Daten geprüft: {len(records)} vollständig verarbeitbare Kollektion/Clip-Zuordnungen.")
-    return records, errors, hit_counts
+    return records, errors, hit_counts, placeholder_ids, excluded_errors, placeholder_rows_total
 
 
 def _empty_transcode() -> dict:
@@ -236,7 +253,10 @@ def _load_state() -> dict:
     return state
 
 
-def _reconcile(state: dict, records: list[dict], errors: list[str]) -> dict:
+def _reconcile(state: dict, records: list[dict], errors: list[str], placeholder_ids: set[str],
+               excluded_errors: list[str]) -> dict:
+    for clip_id in placeholder_ids:
+        state["clips"].pop(clip_id, None)
     pairs, ids = defaultdict(list), defaultdict(list)
     for item in records:
         pairs[(item["identifier"], item["title"])].append(item)
@@ -244,17 +264,17 @@ def _reconcile(state: dict, records: list[dict], errors: list[str]) -> dict:
     duplicated = {id(item) for group in (*pairs.values(), *ids.values()) if len(group) > 1 for item in group}
     for (identifier, title), group in pairs.items():
         if len(group) > 1:
-            errors.append(f"Duplikat Identifier/Titel: {identifier!r} / {title!r}; "
-                          f"Clip_IDs: {', '.join(item['clip_id'] for item in group)}")
+            _excluded_issue(errors, excluded_errors, f"Duplikat Identifier/Titel: {identifier!r} / {title!r}; "
+                            f"Clip_IDs: {', '.join(item['clip_id'] for item in group)}")
     for clip_id, group in ids.items():
         if len(group) > 1:
-            errors.append(f"Clip_ID mehrfach in Suche: {clip_id!r}; alle Treffer übersprungen")
+            _excluded_issue(errors, excluded_errors, f"Clip_ID mehrfach in Suche: {clip_id!r}; alle Treffer übersprungen")
     for clip_id, old in state["clips"].items():
         if clip_id not in ids:
             old["active"] = False
-            errors.append(f"Im aktuellen Suchlauf nicht gefunden (im Zustand behalten): "
-                          f"Clip_ID={clip_id}, Clipname={old['clip_name_with_extension'] or 'unbekannt'}, "
-                          f"Kollektion={old['collection']}")
+            _excluded_issue(errors, excluded_errors, f"Im aktuellen Suchlauf nicht gefunden (im Zustand behalten): "
+                            f"Clip_ID={clip_id}, Clipname={old['clip_name_with_extension'] or 'unbekannt'}, "
+                            f"Kollektion={old['collection']}")
         elif any(id(item) in duplicated for item in ids[clip_id]):
             old["active"] = False
     for item in records:
@@ -412,7 +432,8 @@ def _format_int(value: int, previous: int | None) -> str:
 
 def _render(kind: str, when: datetime, totals: dict, previous: dict) -> str:
     rows = []
-    for name, (total, ready, *queues) in totals.items():
+    summary = tuple(sum(row[index] for row in totals.values()) for index in range(len(queue_names) + 2))
+    for name, (total, ready, *queues) in (*totals.items(), ("Summe", summary)):
         percent = 100 * ready / total if total else 0.0
         old = previous.get(name, (None,) * 6)
         percent_text = "0" if total == 0 else f"{percent:.1f}"
@@ -422,7 +443,9 @@ def _render(kind: str, when: datetime, totals: dict, previous: dict) -> str:
     widths = [max(len(str(row[i])) for row in (columns, *rows)) for i in range(len(columns))]
     table = [" | ".join(str(cell).ljust(width) for cell, width in zip(columns, widths)),
              "-+-".join("-" * width for width in widths)]
-    table += [" | ".join(str(cell).ljust(width) for cell, width in zip(row, widths)) for row in rows]
+    table += [" | ".join(str(cell).ljust(width) for cell, width in zip(row, widths)) for row in rows[:-1]]
+    table.append("-+-".join("-" * width for width in widths))
+    table.append(" | ".join(str(cell).ljust(width) for cell, width in zip(rows[-1], widths)))
     return f"{app_name} {app_version} | {kind} | {when.isoformat(timespec='seconds')}\n\n" + "\n".join(table) + "\n"
 
 
@@ -455,10 +478,10 @@ def _report(kind: str) -> Path:
     _log(f"{kind}-Bericht gestartet: Kollektionsmapping laden.")
     mapping = _load_mapping()
     _log(f"Kollektionsmapping geladen: {len(mapping)} Kollektionen.")
-    records, errors, _ = _search_clips(mapping)
+    records, errors, _, placeholder_ids, excluded_errors, placeholder_rows = _search_clips(mapping)
     _log(f"Zustandsabgleich gestartet: {len(records)} Kollektions-/Clip-Zuordnungen.")
     step_started = perf_counter()
-    state = _reconcile(_load_state(), records, errors)
+    state = _reconcile(_load_state(), records, errors, placeholder_ids, excluded_errors)
     _log(f"Zustandsabgleich abgeschlossen: {len(state['clips'])} Clips im Zustand; "
          f"{perf_counter() - step_started:.1f} s.")
     _log("AQC-Scan gestartet.")
@@ -476,8 +499,12 @@ def _report(kind: str) -> Path:
     when = datetime.now().astimezone()
     name = f"{kind}_{when.strftime('%Y-%m-%d_%H-%M-%S-%f')}"
     text = _render(kind, when, totals, previous)
+    text += (f"\nPlatzhalter: {placeholder_rows} Suchtreffer ignoriert (nicht mitgezählt, keine Auffälligkeit).\n"
+             f"Auffälligkeiten: {len(errors)} Meldungen (keine Anzahl unterschiedlicher Clips).\n"
+             f"  Nicht mitgezählte Treffer / inaktive State-Clips: {len(excluded_errors)} Meldungen.\n"
+             f"  Ohne Clip-Ausschluss: {len(errors) - len(excluded_errors)} Meldungen; aktive Clips zählen weiter.\n")
     if errors:
-        text += f"\nHinweis: {len(errors)} Auffälligkeiten; Details: errors/{name}_errors.txt\n"
+        text += f"Details: errors/{name}_errors.txt\n"
     _log(f"Bericht vorbereitet: {len(errors)} Auffälligkeiten. Zustand speichern und Bericht schreiben.")
     _save_state(state)
     path = reports_dir / f"{name}.txt"
