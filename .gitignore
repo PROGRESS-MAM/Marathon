@@ -5,4 +5,4 @@
 .venv
 /jobs
 /pipelines
-*.ini
+config.ini
