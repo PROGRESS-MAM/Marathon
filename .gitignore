@@ -3,3 +3,5 @@
 /res
 /state
 .venv
+/jobs
+/pipelines
