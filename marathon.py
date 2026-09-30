@@ -60,12 +60,13 @@ lost_proxy, lost_master = "Verloren – Proxy fehlt", "Verloren – Master fehlt
 qc_rejected, job_failed = "QC nicht bestanden", "Job endgültig fehlgeschlagen"
 status_codes = {existing: code for _, existing, code in problem_categories.values()} | {
     lost_proxy: "verloren", lost_master: "verloren", qc_rejected: "qc_abgelehnt", job_failed: "fehlgeschlagen"}
+missing_job_grace = timedelta(minutes=30)  # Before a vanished job file is recreated.
 tracked_fields = {"collection": "Kollektion", "identifier": "Identifier", "title": "Titel",
                   "clip_name_with_extension": "Clipname", "master_files": "Master-Dateien", "filehashes": "Hashes"}
 
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "1.0.0"
+app_version = "1.0.1"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 log_dir = project_dir / "log"
@@ -76,41 +77,14 @@ config_path = res_dir / "config.ini"
 state_path = state_dir / "marathon.json"
 lock_path = state_dir / "marathon.lock"
 main_log = log_dir / "marathon.log"
-config_defaults = {  # section: {key: (default, comment)}; values live in res/config.ini
-    "paths": {
-        "root_path": (r"\\10.0.77.11\Ablage KI Proxy_1\Proxy 10 Mbit", "Netzlaufwerk mit allen Zielordnern"),
-        "defa_dir": ("DEFA", "Zielordner aller DEFA-Kollektionen"),
-        "aqc_dir": ("AQC", "Proxies der Kollegen unterhalb von defa_dir; gehen direkt an QC"),
-        "work_dir": (".marathon", "Arbeitsordner von Marathon"),
-        "defa_marker": ("defa", "Kollektionen mit diesem Text im Namen liefern nach defa_dir"),
-        "proxy_prefix": ("(c)PROGRESS__10Mbit", "Proxy-Namensschema: <proxy_prefix>__<Identifier>__<Titel>.<Endung>"),
-        "cred_file": ("cred.env", "Searcher-Zugang im res-Ordner"),
-        "mapping_file": ("collections.json", "Kollektionsmapping im res-Ordner"),
-        "priority_file": ("priority.txt", "Prioliste im res-Ordner"),
-    },
-    "operation": {
-        "report_only": (True, "true = keine Jobs und keine Schreibzugriffe auf das Netzlaufwerk"),
-        "auto_report_time": (time(9, 0), "Uhrzeit des täglichen Auto-Berichts (HH:MM, Uhr dieses Rechners)"),
-        "retry_minutes": (60, "Wartezeit nach einem fehlgeschlagenen Auto-Bericht"),
-    },
-    "timing": {
-        "cycle_seconds": (60, "Abstand der Job-Zyklen"),
-        "max_job_attempts": (2, "Versuche je Job, danach dauerhaft fehlgeschlagen"),
-        "missing_job_minutes": (30, "Karenz, bevor eine verschwundene Job-Datei neu erstellt wird"),
-        "stable_minutes": (2, "Dateien in AQC und Zielordnern gelten erst nach so vielen Minuten ohne Größenänderung "
-                              "als fertig kopiert (0 = sofort)"),
-    },
-    "limits": {
-        "lto": (1, "Maximal offene LTO-Jobs über alle Kollektionen (0 = Stufe pausiert)"),
-        "transcode": (8, "Maximal offene Transcode-Jobs über alle Kollektionen (0 = Stufe pausiert)"),
-        "qc": (8, "Maximal offene QC-Jobs über alle Kollektionen (0 = Stufe pausiert)"),
-    },
-    "heartbeat": {
-        "worker_timeout_minutes": (10, "Worker ohne Lebenszeichen gilt danach als ausgefallen"),
-        "max_job_hours": (24, "Laufende Jobs, die länger brauchen, werden im Bericht gemeldet"),
-    },
+config_schema = {  # section: {key: kind}; all values and their explanations live in res/config.ini
+    "paths": {"root_path": "text", "defa_dir": "name", "aqc_dir": "name", "work_dir": "name", "defa_marker": "text",
+              "proxy_prefix": "text", "cred_file": "text", "mapping_file": "text", "priority_file": "text"},
+    "operation": {"report_only": "bool", "auto_report_time": "time", "retry_minutes": "number"},
+    "timing": {"cycle_seconds": "number", "max_job_attempts": "number", "stable_minutes": "count"},
+    "limits": {key: "count" for key in limit_keys.values()},
+    "heartbeat": {"worker_timeout_minutes": "number", "max_job_hours": "number"},
 }
-zero_allowed = frozenset({"stable_minutes", *limit_keys.values()})
 
 # --------- INIT ---------
 cfg: dict = {}
@@ -150,38 +124,25 @@ def _log(message: str) -> None:
 
 
 # --------- FUNC: CONFIG ---------
-def _format_value(value) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return value.strftime("%H:%M") if isinstance(value, time) else str(value)
-
-
-def _write_config_template() -> None:
-    lines = [f"# {app_name} – Konfiguration",
-             "# Wird in jedem Zyklus neu gelesen; Änderungen in [paths] wirken erst nach einem Neustart.",
-             "# Bei ungültigen Werten gelten die letzten gültigen weiter; der Bericht meldet das.", ""]
-    for section, keys in config_defaults.items():
-        lines.append(f"[{section}]")
-        for key, (default, comment) in keys.items():
-            lines += [f"# {comment}", f"{key} = {_format_value(default)}"]
-        lines.append("")
-    config_path.write_text("\n".join(lines), encoding="utf-8")
-
-
-def _parse_value(raw: str, default):
-    if isinstance(default, bool):
-        if raw.casefold() not in ("true", "false", "ja", "nein", "1", "0"):
+def _parse_value(kind: str, raw: str):
+    if not raw:
+        raise ValueError("fehlt oder ist leer")
+    if kind == "bool":
+        if raw.casefold() not in ("true", "false"):
             raise ValueError("erwartet true oder false")
-        return raw.casefold() in ("true", "ja", "1")
-    if isinstance(default, int):
-        if not raw.isdecimal():
-            raise ValueError("erwartet eine ganze Zahl")
+        return raw.casefold() == "true"
+    if kind in ("count", "number"):
+        minimum = int(kind == "number")
+        if not raw.isdecimal() or int(raw) < minimum:
+            raise ValueError(f"erwartet eine ganze Zahl ab {minimum}")
         return int(raw)
-    if isinstance(default, time):
+    if kind == "time":
         try:
             return time.fromisoformat(raw)
         except ValueError:
             raise ValueError("erwartet HH:MM") from None
+    if kind == "name" and (any(char in invalid_path_chars for char in raw) or raw in (".", "..")):
+        raise ValueError("muss ein einfacher Ordnername sein")
     return raw
 
 
@@ -189,42 +150,37 @@ def _read_config() -> dict:
     parser = configparser.ConfigParser(interpolation=None)
     with config_path.open(encoding="utf-8-sig") as handle:
         parser.read_file(handle)
-    unknown = [f"[{section}] {key}" for section in parser.sections() for key in parser[section]
-               if key not in config_defaults.get(section, {})]
-    if unknown:
-        raise ValueError(f"unbekannte Einträge: {', '.join(unknown)}")
+    problems = [f"[{section}] {key} ist unbekannt" for section in parser.sections() for key in parser[section]
+                if key not in config_schema.get(section, {})]
     values = {}
-    for section, keys in config_defaults.items():
-        for key, (default, _) in keys.items():
-            raw = parser.get(section, key, fallback="").strip()
+    for section, keys in config_schema.items():
+        for key, kind in keys.items():
             try:
-                value = _parse_value(raw, default) if raw else default
+                values[key] = _parse_value(kind, parser.get(section, key, fallback="").strip())
             except ValueError as exc:
-                raise ValueError(f"[{section}] {key} = {raw!r} ist ungültig ({exc})") from exc
-            minimum = 0 if key in zero_allowed else 1
-            if isinstance(value, int) and not isinstance(value, bool) and value < minimum:
-                raise ValueError(f"[{section}] {key} muss mindestens {minimum} sein")
-            values[key] = value
-    for key in ("defa_dir", "aqc_dir", "work_dir"):
-        if any(char in invalid_path_chars for char in values[key]):
-            raise ValueError(f"[paths] {key} muss ein einfacher Ordnername sein")
+                problems.append(f"[{section}] {key}: {exc}")
+    for key in ("mapping_file", "cred_file"):
+        if key in values and not (res_dir / values[key]).is_file():
+            problems.append(f"[paths] {key}: Datei {res_dir / values[key]} fehlt")
+    if problems:
+        raise ValueError("; ".join(problems))
     return values
 
 
-def _load_config() -> list[str]:
-    """Load res/config.ini into cfg; returns problems while the last valid values stay active."""
-    if not cfg and not config_path.exists():
-        _write_config_template()
+def _load_config() -> str | None:
+    """Load res/config.ini into cfg; returns the reason why Marathon has to pause instead."""
     try:
         values = _read_config()
+    except FileNotFoundError:
+        return f"{config_path} fehlt – Marathon pausiert, bis die Datei vorhanden ist."
     except (OSError, UnicodeError, configparser.Error, ValueError) as exc:
-        if not cfg:
-            raise ValueError(f"{config_path.name} ungültig: {exc}") from exc
-        return [f"{config_path.name} ungültig – letzte gültige Werte gelten: {exc}"]
-    fixed = [key for key in config_defaults["paths"] if cfg and values[key] != cfg[key]]
-    values.update({key: cfg[key] for key in fixed})
+        return f"{config_path.name} fehlerhaft – Marathon pausiert, bis sie korrigiert ist: {exc}"
+    changed = [key for key in config_schema["paths"] if cfg and values[key] != cfg[key]]
+    if changed:
+        return (f"Änderung in [paths] ({', '.join(changed)}) – Marathon pausiert; "
+                f"Neustart nötig oder Änderung zurücknehmen.")
     cfg.update(values)
-    return [f"Änderung in [paths] ({', '.join(fixed)}) wirkt erst nach einem Neustart."] if fixed else []
+    return None
 
 
 # --------- FUNC: SETUP ---------
@@ -235,16 +191,8 @@ def _res(key: str) -> Path:
 def _prepare() -> None:
     for folder in (res_dir, log_dir, state_dir, reports_dir, error_dir):
         folder.mkdir(parents=True, exist_ok=True)
-    created = not config_path.exists()
-    for problem in _load_config():
-        _log(problem)
-    if created:
-        _log(f"Konfiguration mit Standardwerten angelegt: {config_path}")
     if any(path != state_path for path in state_dir.glob("*.json")):
         raise RuntimeError("Weitere JSON-Datei in state gefunden; bitte Quelle des Zustands klären.")
-    for key in ("mapping_file", "cred_file"):
-        if not _res(key).is_file():
-            raise FileNotFoundError(f"Datei fehlt: {_res(key)} (siehe [paths] {key} in {config_path.name}).")
 
 
 def _acquire_lock() -> None:
@@ -1104,7 +1052,7 @@ def _locate_job(clip: dict, ctx: dict) -> None:
     if not job.get("missing_since"):
         job.update(state="fehlt", missing_since=_now())
         _issue(ctx, "note", "Job-Datei nicht auffindbar (wird beobachtet)", clip["clip_id"], f"{_clip_text(clip)}: {folder}/…/{name}")
-    elif _age(job["missing_since"]) >= timedelta(minutes=cfg["missing_job_minutes"]):
+    elif _age(job["missing_since"]) >= missing_job_grace:
         _issue(ctx, "note", "Job-Datei verschwunden – Job neu erstellt", clip["clip_id"], f"{_clip_text(clip)}: {folder}/…/{name}")
         clip["job"] = None
         _rmdir(job["output_folder"])
@@ -1441,15 +1389,12 @@ def _write_new(path: Path, text: str) -> None:
 def _report(kind: str) -> Path:
     started = perf_counter()
     _log(f"{kind}-Bericht gestartet.")
-    problems = _load_config()
     mapping = _load_mapping()
     _check_root()
     state = _load_state()
     ctx = _context()
     ctx["issues"].extend(state["notes"])
     state["notes"] = []
-    for problem in problems:
-        _issue(ctx, "note", "Konfiguration", "config", problem)
     prio = _priority(mapping, state, ctx)
     found = _search_clips(mapping, ctx)
     _reconcile(state, found, ctx)
@@ -1484,8 +1429,7 @@ def _report(kind: str) -> Path:
 
 
 def _cycle() -> str | None:
-    """Run one job cycle; returns the reason if it was skipped."""
-    problems = _load_config()
+    """Run one job cycle with the loaded configuration; returns the reason if it was skipped."""
     if cfg["report_only"]:
         return "Job-Zyklus übersprungen: report_only ist aktiv."
     if not state_path.exists():
@@ -1494,8 +1438,6 @@ def _cycle() -> str | None:
     _check_root()
     state = _load_state()
     ctx = _context()
-    for problem in problems:
-        _issue(ctx, "note", "Konfiguration", "config", problem)
     prio = _priority(mapping, state, ctx)
     _process(state, mapping, prio, ctx)
     known = {(item["category"], item["key"], item["detail"]) for item in state["notes"]}
@@ -1534,36 +1476,39 @@ def main(argv: list[str] | None = None) -> None:
     _prepare()
     _acquire_lock()
     _log(f"{app_name} {app_version} gestartet.")
-    if args.manual or args.auto_once:
-        _report("manual" if args.manual else "auto")
-        return
-    if args.cycle_once:
-        skipped = _cycle()
-        if skipped:
-            _log(skipped)
+    if args.manual or args.auto_once or args.cycle_once:
+        problem = _load_config()
+        if problem:
+            raise RuntimeError(problem)
+        if args.cycle_once:
+            skipped = _cycle()
+            if skipped:
+                _log(skipped)
+        else:
+            _report("manual" if args.manual else "auto")
         return
     commands: queue.Queue[str] = queue.Queue()
     threading.Thread(target=_console, args=(commands,), daemon=True).start()
     _log("Marathon läuft. 'report' = manueller Bericht, 'quit' = beenden.")
-    next_retry, next_cycle, last_problems, last_mode, last_skip = None, datetime.now().astimezone(), [], None, None
+    next_retry, next_cycle = None, datetime.now().astimezone()
+    last_problem, last_mode, last_skip = None, None, None
     while True:
-        problems = _load_config()
-        if problems != last_problems:
-            for problem in problems:
-                _log(problem)
-            last_problems = problems
-        if cfg["report_only"] != last_mode:
+        problem = _load_config()
+        if problem != last_problem:
+            _log(problem or "Konfiguration gültig – Marathon arbeitet weiter.")
+            last_problem = problem
+        now = datetime.now().astimezone()
+        if not problem and cfg["report_only"] != last_mode:
             _log("report_only aktiv: keine Jobs." if cfg["report_only"] else "Jobbetrieb aktiv.")
             last_mode = cfg["report_only"]
-        now = datetime.now().astimezone()
-        if _auto_due(now) and (next_retry is None or now >= next_retry):
+        if not problem and _auto_due(now) and (next_retry is None or now >= next_retry):
             try:
                 _report("auto")
                 next_retry = None
             except Exception as exc:
                 next_retry = now + timedelta(minutes=cfg["retry_minutes"])
                 _log(f"Auto-Bericht fehlgeschlagen: {exc}; erneuter Versuch später.")
-        if not cfg["report_only"] and now >= next_cycle:
+        if not problem and not cfg["report_only"] and now >= next_cycle:
             try:
                 skipped = _cycle()
                 if skipped and skipped != last_skip:
@@ -1576,7 +1521,9 @@ def main(argv: list[str] | None = None) -> None:
             command = commands.get(timeout=5)
         except queue.Empty:
             continue
-        if command == "report":
+        if command == "report" and problem:
+            _log(f"Kein Bericht während der Pause: {problem}")
+        elif command == "report":
             try:
                 _report("manual")
             except Exception as exc:
