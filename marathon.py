@@ -2,7 +2,9 @@
 import argparse
 import configparser
 import copy
+import hashlib
 import json
+import stat
 import os
 import queue
 import shutil
@@ -30,7 +32,7 @@ stages = ("restore", "transcode", "qc")  # Also the stage folder names.
 stage_labels = {"restore": "Restore", "transcode": "Transcode", "qc": "QC"}
 limit_keys = {stage: stage_labels[stage].casefold() for stage in stages}
 job_boxes = ("offen", "laufend", "fertig", "archiv", "zurueckgezogen", "ausgang")
-inbox, outbox, unknown_dir, worker_dir = "eingang", "ausgang", "unbekannt", "worker"
+inbox, outbox, worker_dir = "eingang", "ausgang", "worker"
 report_statuses = ("ok", "failed", "rejected")
 system_files = frozenset({"thumbs.db", "desktop.ini", ".ds_store"})
 busy_suffixes = (".tmp", ".part", ".partial")
@@ -46,6 +48,7 @@ issue_sections = {
     "skipped": "Gefunden, aber nicht aufgenommen (letzter update-index, nicht in Gesamt)",
     "deviation": "Suche weicht von der JSON ab (letzter update-index, nicht übernommen)",
     "inactive": "In der JSON, aber nicht aktiv (nicht in Gesamt)",
+    "final": "Auffällige Clip-Dateien in finalen Ablageordnern",
     "note": "Hinweise (betroffene Clips zählen weiter)",
 }
 index_sections = ("skipped", "deviation")
@@ -61,7 +64,8 @@ problem_categories = {  # kind: (category for new clips, category for clips alre
 metadata_changed = "Metadaten in der Suche geändert"
 lost_proxy, lost_master = "Verloren – Proxy fehlt", "Verloren – Master fehlt vor Transcode"
 qc_rejected, job_failed = "QC nicht bestanden", "Job endgültig fehlgeschlagen"
-status_codes = {lost_proxy: "verloren", lost_master: "verloren", qc_rejected: "qc_abgelehnt", job_failed: "fehlgeschlagen"}
+delivery_blocked, assignment_unclear = "Auslieferung blockiert", "Zuordnung beim Neuaufbau unklar"
+status_codes = {delivery_blocked: "auslieferung_blockiert", assignment_unclear: "zuordnung_ungeklaert", lost_proxy: "verloren", lost_master: "verloren", qc_rejected: "qc_abgelehnt", job_failed: "fehlgeschlagen"}
 commands_help = {
     "run": "Ordner und JSON anlegen, falls sie fehlen; dann Job-Schleife starten",
     "stop": "Job-Schleife anhalten",
@@ -70,6 +74,7 @@ commands_help = {
     "report": "Manuellen Bericht sofort erstellen",
     "create-folders": "Ordnerstruktur aller Kollektionen anlegen",
     "update-index": "Neue Suche; neue Clips aufnehmen, Abweichungen nur melden",
+    "delete-folder": "SMB-Arbeitsordner bereinigen; Index behalten, Prozesszustand neu aufbauen",
     "status": "Anzeigen, was eingeschaltet ist",
     "help": "Diese Übersicht",
     "quit": "Marathon beenden",
@@ -81,7 +86,7 @@ tracked_fields = {"collection": "Kollektion", "identifier": "Identifier", "title
 
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "1.1.0"
+app_version = "1.2.0"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 log_dir = project_dir / "log"
@@ -96,7 +101,7 @@ config_schema = {  # section: {key: kind}; all values and their explanations liv
     "paths": {"root_path": "text", "defa_dir": "name", "work_dir": "name", "defa_marker": "text",
               "proxy_prefix": "text", "cred_file": "text", "mapping_file": "text", "priority_file": "text"},
     "operation": {"auto_report_time": "time", "retry_minutes": "number"},
-    "timing": {"cycle_seconds": "number", "max_job_attempts": "number", "stable_minutes": "count"},
+    "timing": {"cycle_seconds": "number", "max_job_attempts": "number"},
     "limits": {key: "count" for key in limit_keys.values()},
     "heartbeat": {"worker_timeout_minutes": "number", "max_job_hours": "number"},
 }
@@ -152,7 +157,7 @@ def _parse_value(kind: str, raw: str):
             return time.fromisoformat(raw)
         except ValueError:
             raise ValueError("erwartet HH:MM") from None
-    if kind == "name" and (any(char in invalid_path_chars for char in raw) or raw in (".", "..")):
+    if kind == "name" and (any(char in invalid_path_chars for char in raw) or raw in (".", "..") or raw != raw.rstrip(". ")):
         raise ValueError("muss ein einfacher Ordnername sein")
     return raw
 
@@ -162,7 +167,7 @@ def _read_config() -> dict:
     with config_path.open(encoding="utf-8-sig") as handle:
         parser.read_file(handle)
     problems = [f"[{section}] {key} ist unbekannt" for section in parser.sections() for key in parser[section]
-                if key not in config_schema.get(section, {})]
+                if key not in config_schema.get(section, {}) and (section, key) != ("timing", "stable_minutes")]
     values = {}
     for section, keys in config_schema.items():
         for key, kind in keys.items():
@@ -289,6 +294,9 @@ def _load_mapping() -> list[dict]:
                 raise ValueError(f"Ungültige Suchbedingung für {name!r}.")
         seen.add(name.casefold())
         folders[_work_folder(name).casefold()].append(name)
+    work_key = cfg["work_dir"].rstrip(". ").casefold()
+    if work_key in {_final_folder(entry["name"]).rstrip(". ").casefold() for entry in entries}:
+        raise ValueError("Arbeitsordner und finaler Ablageordner dürfen nicht denselben Namen haben.")
     clashes = [" / ".join(names) for names in folders.values() if len(names) > 1]
     if clashes:
         raise ValueError(f"Kollektionen ergeben denselben Arbeitsordner: {'; '.join(clashes)}")
@@ -336,7 +344,7 @@ def _file_name(userpath: str) -> str:
 
 
 def _context() -> dict:
-    return {"issues": [], "listings": {}, "indexes": {}, "touched": set()}
+    return {"issues": [], "listings": {}, "indexes": {}, "final_counts": {}}
 
 
 def _issue(ctx: dict, section: str, category: str, key: str, detail: str) -> None:
@@ -363,7 +371,7 @@ def _event(clip: dict, event: str, detail: str = "") -> None:
 
 
 def _set_issue(clip: dict, kind: str, category: str | None = None, detail: str = "") -> None:
-    old = clip["issues"][kind]
+    old = clip["issues"].get(kind)
     if category is None:
         clip["issues"][kind] = None
         return
@@ -450,8 +458,11 @@ def _write_text_atomic(path: Path, text: str) -> None:
 
 def _move(relative: str, target_folder: str, name: str | None = None, replace: bool = False) -> bool:
     """Move a file or folder on the share; False if another process moved it first."""
-    source = _path(relative)
-    target = _path(target_folder) / (name or source.name)
+    source = _safe_work_path(relative)
+    target_name = name or source.name
+    if _file_name(target_name) != target_name or any(char in invalid_path_chars for char in target_name):
+        raise ValueError(f"Unsicherer Arbeitsdateiname: {target_name!r}")
+    target = _safe_work_path(target_folder) / target_name
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.exists() and not replace:
         target = target.with_name(f"{target.stem}.{_stamp()}{target.suffix}")
@@ -464,34 +475,271 @@ def _move(relative: str, target_folder: str, name: str | None = None, replace: b
 
 def _remove_tree(relative: str, ctx: dict, category: str) -> None:
     try:
-        shutil.rmtree(_path(relative))
+        path = _safe_work_path(relative)
+        _work_inventory([relative])
+        shutil.rmtree(path)
     except FileNotFoundError:
         pass
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
         _issue(ctx, "note", category, relative, f"{relative}: {exc}")
 
 
 def _rmdir(relative: str) -> None:
     try:
-        _path(relative).rmdir()
-    except OSError:
-        pass  # Not empty or already gone.
+        _safe_work_path(relative).rmdir()
+    except (OSError, ValueError):
+        pass  # Not empty, outside work folders or already gone.
 
 
-def _stable(state: dict, ctx: dict, relative: str, size: int) -> bool:
-    """True once a file kept its size for stable_minutes, measured with Marathon's own clock."""
-    ctx["touched"].add(relative)
-    entry = state["files_seen"].get(relative)
-    if entry is None or entry["size"] != size:
-        entry = state["files_seen"][relative] = {"size": size, "since": _now()}
-    return _age(entry["since"]) >= timedelta(minutes=cfg["stable_minutes"])
+class DeliveryBlocked(Exception):
+    pass
+
+
+def _is_link(path: Path) -> bool:
+    info = path.lstat()
+    return stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_file_attributes", 0) & 0x400)
+
+
+def _safe_work_path(relative: str) -> Path:
+    """Allow only root/work_dir and root/<collection>/work_dir; reject links and path aliases."""
+    parts = relative.split("/")
+    if any(not part or part in (".", "..") or part != part.rstrip(". ") or
+           any(char in invalid_path_chars for char in part) for part in parts):
+        raise ValueError(f"Unsicherer Arbeitsordner-Pfad: {relative}")
+    work = cfg["work_dir"].casefold()
+    positions = [i for i, part in enumerate(parts) if part.casefold() == work]
+    if not positions or positions[0] not in (0, 1):
+        raise ValueError(f"Nicht innerhalb eines Marathon-Arbeitsordners: {relative}")
+    root = Path(cfg["root_path"])
+    path = root
+    for part in parts:
+        path /= part
+        if os.path.lexists(path) and _is_link(path):
+            raise ValueError(f"Verknüpfung/Junction wird nicht verändert: {relative}")
+    return path
+
+
+def _deliver_proxy(relative: str, final: str, name: str) -> None:
+    """Deliver without overwriting final files, even when a file arrives after the existence check."""
+    source = _safe_work_path(relative)
+    target = _path(final) / name
+    if _file_name(name) != name or any(c in invalid_path_chars for c in name):
+        raise DeliveryBlocked(f"Unsicherer Proxy-Dateiname: {name!r}; Proxy und Master bleiben erhalten")
+    if any(key == name.casefold() for key in _scan(final)) or os.path.lexists(target):
+        raise DeliveryBlocked(f"Namenskonflikt: {target}; neuer Proxy={source}; Proxy und Master bleiben erhalten")
+    try:
+        if os.name == "nt":
+            os.rename(source, target)  # Windows refuses an existing target.
+        else:
+            size = source.stat().st_size
+            with source.open("rb") as reader, target.open("xb") as writer:
+                shutil.copyfileobj(reader, writer)
+                writer.flush()
+                os.fsync(writer.fileno())
+            if source.stat().st_size != size or target.stat().st_size != size:
+                raise DeliveryBlocked(f"Dateigröße bei Auslieferung nach {target} geändert; Quelldatei und Master bleiben erhalten")
+            source.unlink()
+    except FileExistsError:
+        raise DeliveryBlocked(f"Namenskonflikt: {target}; Proxy und Master bleiben erhalten") from None
+    except OSError as exc:
+        raise DeliveryBlocked(f"Auslieferung nach {target} nicht möglich: {exc}; Master bleibt erhalten") from exc
+    if not target.is_file() or target.stat().st_size == 0:
+        raise DeliveryBlocked(f"Auslieferung nach {target} konnte nicht bestätigt werden; Master bleibt erhalten")
+
+
+def _work_roots(mapping: list[dict], state: dict) -> list[str]:
+    """Include former collection work roots directly below root, but never search in AQC or other subfolders."""
+    work = cfg["work_dir"]
+    roots = {work} | {f"{_final_folder(c)}/{work}" for c in
+                     [*(e["name"] for e in mapping), *(c["collection"] for c in state["clips"].values())]}
+    for folder in _subfolders(""):
+        if folder.casefold() == work.casefold():
+            continue
+        candidate = f"{folder}/{work}"
+        if os.path.lexists(_path(candidate)):
+            roots.add(candidate)
+    result = []
+    seen = set()
+    for relative in sorted(roots, key=str.casefold):
+        path = _safe_work_path(relative)
+        if os.path.lexists(path):
+            if not path.is_dir():
+                raise ValueError(f"Arbeitsordner ist keine normale Ordnerstruktur: {relative}")
+            key = str(path.resolve()).casefold()
+            if key not in seen:
+                seen.add(key)
+                result.append(relative)
+    return result
+
+
+def _work_inventory(roots: list[str]) -> dict[str, tuple[str, int, int]]:
+    """Snapshot all entries; any links, special files or unreadable folders block deletion."""
+    entries = {}
+    for relative in roots:
+        pending = [_safe_work_path(relative)]
+        while pending:
+            path = pending.pop()
+            if _is_link(path):
+                raise ValueError(f"Verknüpfung/Junction im Löschumfang: {path}")
+            info = path.lstat()
+            if not stat.S_ISDIR(info.st_mode) and not stat.S_ISREG(info.st_mode):
+                raise ValueError(f"Kein normaler Ordner oder normale Datei: {path}")
+            is_dir = stat.S_ISDIR(info.st_mode)
+            key = path.relative_to(Path(cfg["root_path"])).as_posix()
+            entries[key] = ("dir" if is_dir else "file", info.st_size, info.st_mtime_ns)
+            if is_dir:
+                pending.extend(path.iterdir())
+    return dict(sorted(entries.items()))
+
+
+def _busy_workers(entries: dict[str, tuple[str, int, int]]) -> list[str]:
+    """Fail closed for unfinished running jobs or recent/invalid worker heartbeats."""
+    problems, finished = [], set()
+    for relative, (kind, _, _) in entries.items():
+        path = Path(relative)
+        if kind != "file" or path.suffix.casefold() != ".json" or path.parent.name != "fertig":
+            continue
+        try:
+            report = json.loads(_path(relative).read_text(encoding="utf-8"))
+            if _report_problem(report) is None and report["job_id"] == path.stem:
+                finished.add((path.parent.parent.as_posix(), report["job_id"]))
+        except (OSError, ValueError, UnicodeError):
+            continue
+    for relative, (kind, _, mtime) in entries.items():
+        parts = relative.split("/")
+        if kind != "file":
+            continue
+        if "laufend" in parts:
+            pos = parts.index("laufend")
+            job_id = Path(parts[-1]).stem
+            if Path(parts[-1]).suffix.casefold() == ".json" and ("/".join(parts[:pos]), job_id) not in finished:
+                problems.append(f"Laufender/ungeklärter Job: {relative}")
+        if len(parts) == 3 and parts[:2] == [cfg["work_dir"], worker_dir]:
+            try:
+                data = json.loads(_path(relative).read_text(encoding="utf-8"))
+                if not isinstance(data, dict) or "job_id" not in data:
+                    raise ValueError("ungültiger Heartbeat")
+                fresh = datetime.now().timestamp() - mtime / 1_000_000_000 < cfg["worker_timeout_minutes"] * 60
+                if fresh or data["job_id"]:
+                    problems.append(f"Worker noch aktiv oder Job gemeldet: {relative}")
+            except (OSError, ValueError, UnicodeError):
+                problems.append(f"Worker-Status nicht prüfbar: {relative}")
+    return problems
+
+
+def _cleanup_plan() -> dict:
+    mapping = _load_mapping()
+    _check_root()
+    state = _load_state()
+    roots = _work_roots(mapping, state)
+    entries = _work_inventory(roots)
+    busy = _busy_workers(entries)
+    if busy:
+        raise RuntimeError("Bereinigung blockiert. Worker zuerst beenden und laufende Jobs klären.\n" + "\n".join(busy))
+    clips = [relative for relative, (kind, _, _) in entries.items() if kind == "file" and
+             Path(relative).suffix.casefold() not in protocol_suffixes and
+             Path(relative).name.casefold() not in system_files]
+    # A .part/.tmp may itself contain media. Never delete it without a confirmation.
+    clips += [relative for relative, (kind, _, _) in entries.items() if kind == "file" and
+              Path(relative).suffix.casefold() in busy_suffixes]
+    fingerprint = hashlib.sha256(state_path.read_bytes()).hexdigest() if state_path.exists() else None
+    return {"roots": roots, "entries": entries, "clips": sorted(set(clips)), "state_hash": fingerprint}
+
+
+def _rebuild_process_state(state: dict) -> dict:
+    """Keep index, metadata and history; rediscover remaining files without search, jobs or directory creation."""
+    ctx, groups = _context(), defaultdict(list)
+    for clip in state["clips"].values():
+        groups[(_normalize(clip["identifier"]), _normalize(clip["title"]))].append(clip["clip_id"])
+    for clip in state["clips"].values():
+        previous = _position(clip)
+        collection, clip_id = clip["collection"], clip["clip_id"]
+        clip.update(job=None, attempts=0, ready=False, active=True, stage="restore", status="wartet", queued_at=_stamp())
+        clip["files"] = {"master": None, "proxy": None}
+        clip["issues"] = {"file": None, "sticky": None}
+        found = [(folder, source, _lookup(ctx, folder, clip["identifier"], clip["title"])) for folder, source in
+                 [(_final_folder(collection), "Zielordner"), (_qc_inbox(collection), "QC-Eingang")]]
+        duplicate = len(groups[(_normalize(clip["identifier"]), _normalize(clip["title"]))]) > 1
+        crowded = [f"{folder}: {', '.join(names)}" for folder, _, names in found if len(names) > 1]
+        if duplicate or crowded:
+            _set_issue(clip, "sticky", assignment_unclear, "Doppelte Index-Zuordnung" if duplicate else "; ".join(crowded))
+        else:
+            proxy = next(((folder, names[0], source) for folder, source, names in found if names), None)
+            missing = _missing_masters(ctx, collection, clip_id, clip["master_files"])
+            if missing is not None:
+                clip["files"]["master"] = {"folder": _master_folder(collection, clip_id),
+                                           "names": list(clip["master_files"]), "source": "Neuaufbau", "last_seen_at": _now()}
+            if proxy:
+                clip["files"]["proxy"] = _file_entry(*proxy)
+                clip.update(ready=proxy[2] == "Zielordner", stage=None if proxy[2] == "Zielordner" else "qc")
+            elif missing == []:
+                clip["stage"] = "transcode"
+            elif not clip["master_files"] or len(clip["master_files"]) != len(clip["filehashes"]):
+                _set_issue(clip, "sticky", assignment_unclear, "Dateinamen und Hashes reichen nicht für Restore")
+        _update_activity(clip, ctx)
+        clip["status"] = _status(clip)
+        _event(clip, "Prozesszustand nach Bereinigung neu aufgebaut", f"Vorher: {previous}")
+    state.update(workers={}, files_seen={}, updated_at=_now())
+    _keep_notes(state, [dict(item, section="note") for item in ctx["issues"]])
+    return state
+
+
+def _delete_folders(plan: dict) -> None:
+    """Execute only an unchanged preflight; persist a marker before the first irreversible deletion."""
+    fresh = _cleanup_plan()
+    if fresh != plan:
+        raise RuntimeError("Dateien, Worker oder JSON haben sich geändert. Nichts gelöscht; 'delete-folder' erneut eingeben.")
+    state = _load_state()
+    had_state = state_path.exists()
+    if had_state:
+        state["cleanup"] = {"pending": True, "at": _now(), "folders": plan["roots"]}
+        _save_state(state)
+    _log(f"Bereinigung beginnt: {len(plan['roots'])} Arbeitsordner, {len(plan['clips'])} Clip-/Mediendateien.")
+    errors = []
+    for relative in plan["roots"]:
+        try:
+            path = _safe_work_path(relative)
+            _work_inventory([relative])
+            shutil.rmtree(path)
+            if os.path.lexists(path):
+                raise OSError("Arbeitsordner nach Löschung weiterhin vorhanden")
+            _log(f"Arbeitsordner gelöscht: {relative}")
+        except (OSError, ValueError) as exc:
+            errors.append(f"{relative}: {exc}")
+    ensured_folders.clear()
+    if had_state:
+        state = _rebuild_process_state(state)
+        state["cleanup"] = {"pending": bool(errors), "at": _now(), "folders": plan["roots"], "errors": errors}
+        _save_state(state)
+        if _load_state() != state:
+            raise RuntimeError("JSON-Neuaufbau konnte nicht bestätigt werden; Job-Schleife bleibt aus.")
+    if errors:
+        raise RuntimeError("Bereinigung unvollständig; Job-Schleife bleibt aus.\n" + "\n".join(errors))
+    _log(f"Bereinigung abgeschlossen: {len(plan['roots'])} Arbeitsordner entfernt. "
+         "Finale Dateien erhalten; Index behalten; Job-Schleife bleibt aus.")
+
+
+def _begin_delete() -> dict | None:
+    plan = _cleanup_plan()
+    _log(f"Löschumfang: {len(plan['roots'])} Arbeitsordner samt Unterordnern:\n" + "\n".join(plan["roots"]))
+    if not plan["roots"]:
+        if state_path.exists() and _load_state().get("cleanup", {}).get("pending"):
+            _delete_folders(plan)
+        else:
+            _log("Keine Marathon-Arbeitsordner auf dem SMB gefunden.")
+        return None
+    if plan["clips"]:
+        _log(f"WARNUNG: {len(plan['clips'])} Clip-/Mediendateien werden unwiderruflich gelöscht:\n" +
+             "\n".join(plan["clips"]) + "\nZum Bestätigen 'loeschen' eingeben, sonst 'abbrechen'.")
+        return plan
+    _delete_folders(plan)
+    return None
 
 
 def _ensure_folders(mapping: list[dict], force: bool = False) -> int:
-    """Create missing work, stage and unknown folders; returns how many were created."""
+    """Create missing work and stage folders; returns how many were created."""
     folders = {cfg["work_dir"], f"{cfg['work_dir']}/{worker_dir}"}
     for entry in mapping:
-        folders.add(f"{_final_folder(entry['name'])}/{unknown_dir}")
         for stage in stages:
             base = _stage_folder(entry["name"], stage)
             folders |= {f"{base}/{box}" for box in (*job_boxes, *((inbox,) if stage != "restore" else ()))}
@@ -499,6 +747,8 @@ def _ensure_folders(mapping: list[dict], force: bool = False) -> int:
     folders |= {"/".join(items[:end]) for items in parts for end in range(1, len(items))}
     created = 0
     for relative in sorted(folders):  # Parents sort before their children.
+        if cfg["work_dir"] in relative.split("/"):
+            _safe_work_path(relative)
         if force or relative not in ensured_folders:
             if not _path(relative).is_dir():
                 _path(relative).mkdir(parents=True, exist_ok=True)
@@ -956,16 +1206,13 @@ def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
         source = f"{proxy['folder']}/{proxy['name']}"
         if not _path(source).is_file():
             return f"Proxy {source} vor der Auslieferung nicht mehr vorhanden"
-        if _path(f"{final}/{proxy['name']}").exists():
-            _move(f"{final}/{proxy['name']}", f"{final}/{unknown_dir}")
-            _issue(ctx, "note", "Unbekannte Datei nach unbekannt verschoben", f"{final}/{proxy['name']}",
-                   f"{final}/{proxy['name']} → {final}/{unknown_dir}/ (Namenskonflikt bei Auslieferung)")
-        _move(source, final)
+        _deliver_proxy(source, final, proxy["name"])
         clip["files"]["proxy"] = _file_entry(final, proxy["name"], "QC")
         master = clip["files"]["master"]
         if master and not master.get("deleted_at"):
             _remove_tree(master["folder"], ctx, "Master nicht löschbar (bleiben liegen)")
-            master["deleted_at"] = _now()
+            if not _path(master["folder"]).exists():
+                master["deleted_at"] = _now()
         clip.update(ready=True, stage=None)
         _event(clip, "Bereit", f"{final}/{proxy['name']}")
     return None
@@ -980,7 +1227,13 @@ def _apply_report(clip: dict, job: dict, report: dict, worker: str | None, ctx: 
         status = "failed"
     if status == "ok":
         _event(clip, f"{label}-Job fertig", by + (f", Preset {report['preset']}" if report.get("preset") else ""))
-        problem = _take_outputs(clip, job, report, ctx)
+        try:
+            problem = _take_outputs(clip, job, report, ctx)
+        except DeliveryBlocked as exc:
+            _set_issue(clip, "sticky", delivery_blocked, str(exc))
+            _event(clip, delivery_blocked, str(exc))
+            _finish_output(job, True, ctx)
+            return
         if problem is None:
             clip["attempts"] = 0
             _finish_output(job, True, ctx)
@@ -1133,29 +1386,67 @@ def _status(clip: dict) -> str:
     return "laufend" if clip["job"] and clip["job"]["state"] == "laufend" else "wartet"
 
 
-def _sweep_final(state: dict, mapping: list[dict], ctx: dict, writing: bool) -> None:
-    known = defaultdict(set)
-    for clip in state["clips"].values():
-        if clip["ready"] and clip["files"]["proxy"]:
-            known[clip["files"]["proxy"]["folder"]].add(clip["files"]["proxy"]["name"].casefold())
-    for final in sorted({_final_folder(entry["name"]) for entry in mapping}):
-        for key, (name, size) in sorted(_listing(ctx, final).items()):
-            if key in known[final] or _ignored(name):
+def _final_audit(state: dict, mapping: list[dict], ctx: dict) -> None:
+    """Count unexpected and unknown final files without changing files or JSON status."""
+    by_key, by_name = defaultdict(dict), defaultdict(dict)
+    clips = state["clips"]
+    for clip_id, clip in clips.items():
+        by_key[(_normalize(clip["identifier"]), _normalize(clip["title"]))][clip_id] = clip
+        proxy = clip["files"].get("proxy")
+        if proxy:
+            by_name[proxy["name"].casefold()][clip_id] = clip
+    finals = {_final_folder(entry["name"]) for entry in mapping} | {_final_folder(c["collection"]) for c in clips.values()}
+    counts, matched = {}, defaultdict(list)
+    for final in sorted(finals, key=str.casefold):
+        counts[final] = {"unknown": 0, "unexpected": 0}
+        for name, size in sorted(_listing(ctx, final).values()):
+            if _ignored(name) or name.casefold().endswith(protocol_suffixes):
                 continue
+            candidates = dict(by_name.get(name.casefold(), {}))
+            for key in _proxy_keys(name) or ():
+                candidates.update(by_key.get(key, {}))
             relative = f"{final}/{name}"
-            if not writing:
-                _issue(ctx, "note", "Unbekannte Datei im Zielordner (wird bei run nach unbekannt verschoben)",
-                       relative, relative)
+            if len(candidates) != 1:
+                counts[final]["unknown"] += 1
+                reason = "Kein JSON-Eintrag zuordenbar" if not candidates else "Mehrere JSON-Einträge zuordenbar"
+                ids = ", ".join(sorted(candidates, key=int))
+                _issue(ctx, "final", "Unbekannte finale Clip-Datei", relative,
+                       f"Fundort={relative}; {reason}" + (f"; Clip_IDs={ids}" if ids else ""))
                 continue
-            if not _stable(state, ctx, relative, size):
-                continue
-            try:
-                moved = _move(relative, f"{final}/{unknown_dir}")
-            except OSError as exc:
-                _issue(ctx, "note", "Unbekannte Datei noch in Benutzung (nächster Versuch im nächsten Zyklus)", relative, f"{relative}: {exc}")
-                continue
-            if moved:
-                _issue(ctx, "note", "Unbekannte Datei nach unbekannt verschoben", relative, f"{relative} → {final}/{unknown_dir}/")
+            clip_id, clip = next(iter(candidates.items()))
+            matched[clip_id].append((final, name, size, clip))
+    for files in matched.values():
+        for final, name, size, clip in files:
+            proxy = clip["files"].get("proxy")
+            expected = f"{proxy['folder']}/{proxy['name']}" if proxy else "Kein Proxy im JSON vermerkt"
+            actual = f"{final}/{name}"
+            reasons = []
+            if clip["status"] != "bereit" or not clip["ready"] or clip["stage"] is not None or not clip["active"]:
+                reasons.append(f"JSON: Status={clip['status']}, Stufe={clip['stage']}, aktiv={clip['active']}")
+            if _final_folder(clip["collection"]).casefold() != final.casefold():
+                reasons.append(f"Falscher Ablageordner; final erwartet={_final_folder(clip['collection'])}")
+            if not proxy or expected.casefold() != actual.casefold():
+                reasons.append(f"JSON-Fundort abweichend; erwartet={expected}")
+            if len(files) > 1:
+                reasons.append("Mehrere finale Dateien für diesen Clip: " + ", ".join(f"{f}/{n}" for f, n, _, _ in files))
+            if not size:
+                reasons.append("Datei ist leer")
+            if reasons:
+                counts[final]["unexpected"] += 1
+                _issue(ctx, "final", "Unerwartete finale Clip-Datei", actual,
+                       f"Fundort={actual}; {_clip_text(clip)}; Identifier={clip['identifier']}; Titel={clip['title']}; "
+                       + "; ".join(reasons))
+    ctx["final_counts"] = counts
+
+
+def _final_lines(ctx: dict) -> list[str]:
+    counts = ctx["final_counts"]
+    unknown = sum(row["unknown"] for row in counts.values())
+    unexpected = sum(row["unexpected"] for row in counts.values())
+    return ["Finale Ablage (Dateianzahl, gemeinsamer DEFA-Ordner nur einmal):",
+            "Ablageordner | Unbekannt | Unerwartet", *[
+                f"{folder} | {row['unknown']} | {row['unexpected']}" for folder, row in counts.items()],
+            f"Summe | {unknown} | {unexpected}"]
 
 
 def _leftovers(state: dict, mapping: list[dict], ctx: dict) -> None:
@@ -1254,13 +1545,11 @@ def _process(state: dict, mapping: list[dict], prio: dict[str, list[str]], ctx: 
     for clip in clips.values():
         _set_issue(clip, "file", *_check_files(clip, ctx))
         _update_activity(clip, ctx)
-    _sweep_final(state, mapping, ctx, writing)
     if writing:
         _schedule(state, prio, ctx)
     for clip in clips.values():
         clip["status"] = _status(clip)
-    for key in set(state["files_seen"]) - ctx["touched"]:
-        del state["files_seen"][key]
+    state["files_seen"] = {}  # Compatibility with states from earlier versions.
 
 
 # --------- FUNC: REPORT ---------
@@ -1417,6 +1706,7 @@ def _report(kind: str) -> Path:
     ctx["listings"].clear()
     ctx["indexes"].clear()
     _leftovers(view, mapping, ctx)
+    _final_audit(state, mapping, ctx)
     totals = _totals(view, mapping)
     try:
         previous = _read_previous(_previous(kind))
@@ -1427,6 +1717,7 @@ def _report(kind: str) -> Path:
     name = _file_stamp(kind, when)
     watch, workers = _watch_lines(view), _worker_lines(view)
     text = _render(kind, when, totals, prio, previous) + f"\nIndex-Stand: {state['index']['updated_at'] or 'unbekannt'}\n\n"
+    text += "\n".join(_final_lines(ctx)) + "\n\n"
     text += "\n".join(_summary_lines(ctx["issues"])) + "\n"
     text += f"\nAuffällige laufende Jobs: {len(watch)}\n" + "".join(f"{line}\n" for line in watch)
     text += f"\nWorker (Heartbeat): {len(workers)}\n" + "".join(f"{line}\n" for line in workers)
@@ -1451,6 +1742,8 @@ def _cycle() -> str | None:
     mapping = _load_mapping()
     _check_root()
     state, ctx = _load_state(), _context()
+    if state.get("cleanup", {}).get("pending"):
+        return "Bereinigung noch unvollständig; zuerst delete-folder erneut ausführen."
     _process(state, mapping, _priority(mapping, state, ctx), ctx, writing=True)
     _keep_notes(state, ctx["issues"])
     state["updated_at"] = _now()
@@ -1467,6 +1760,8 @@ def _create_folders() -> None:
 
 def _start_run() -> None:
     """Quick start: create missing folders and build the JSON if it does not exist yet."""
+    if state_path.exists() and _load_state().get("cleanup", {}).get("pending"):
+        raise RuntimeError("Bereinigung noch unvollständig; zuerst 'delete-folder' erneut ausführen.")
     _create_folders()
     if not state_path.exists():
         _log("Noch keine JSON – Index wird aus der Suche aufgebaut.")
@@ -1497,6 +1792,7 @@ def _console(commands: queue.Queue[str]) -> None:
         try:
             command = _command(input("Marathon> "))
         except EOFError:
+            commands.put("__eof__")
             return
         commands.put(command)
         if command == "quit":
@@ -1522,6 +1818,7 @@ def main(argv: list[str] | None = None) -> None:
         threading.Thread(target=_console, args=(commands,), daemon=True).start()
     _log("Marathon wartet auf Befehle ('help' zeigt alle).")
     running = auto = False
+    pending_delete = None
     next_cycle = next_retry = last_problem = last_skip = None
     while True:
         problem = _load_config()
@@ -1529,25 +1826,38 @@ def main(argv: list[str] | None = None) -> None:
             _log(problem or "Konfiguration gültig.")
             last_problem = problem
         now = datetime.now().astimezone()
-        if auto and not problem and _auto_due(now) and (next_retry is None or now >= next_retry):
-            try:
-                _report("auto")
-                next_retry = None
-            except Exception as exc:
-                next_retry = now + timedelta(minutes=cfg["retry_minutes"])
-                _log(f"Auto-Bericht fehlgeschlagen: {exc}; neuer Versuch in {cfg['retry_minutes']} min.")
-        if running and not problem and now >= next_cycle:
-            try:
-                skipped = _cycle()
-                if skipped and skipped != last_skip:
-                    _log(skipped)
-                last_skip = skipped
-            except Exception as exc:
-                _log(f"Job-Zyklus fehlgeschlagen: {exc}; Zustand unverändert.")
-            next_cycle = now + timedelta(seconds=cfg["cycle_seconds"])
         try:
-            command = commands.get(timeout=5)
+            command = commands.get(timeout=0.5)
         except queue.Empty:
+            if auto and not problem and _auto_due(now) and (next_retry is None or now >= next_retry):
+                try:
+                    _report("auto")
+                    next_retry = None
+                except Exception as exc:
+                    next_retry = now + timedelta(minutes=cfg["retry_minutes"])
+                    _log(f"Auto-Bericht fehlgeschlagen: {exc}; neuer Versuch in {cfg['retry_minutes']} min.")
+            if running and not problem and now >= next_cycle:
+                try:
+                    skipped = _cycle()
+                    if skipped and skipped != last_skip:
+                        _log(skipped)
+                    last_skip = skipped
+                except Exception as exc:
+                    _log(f"Job-Zyklus fehlgeschlagen: {exc}; Job-Schleife bleibt aktiv.")
+                next_cycle = now + timedelta(seconds=cfg["cycle_seconds"])
+            continue
+        if pending_delete is not None:
+            plan, pending_delete = pending_delete, None
+            if command == "loeschen" and not problem:
+                try:
+                    _delete_folders(plan)
+                except Exception as exc:
+                    _log(f"Bereinigung fehlgeschlagen: {exc}")
+                continue
+            _log("Bereinigung abgebrochen. Nichts gelöscht; Job-Schleife bleibt aus.")
+            if command not in ("quit", "__eof__"):
+                continue
+        if command == "__eof__":
             continue
         if command == "quit":
             _log("Marathon beendet.")
@@ -1559,6 +1869,9 @@ def main(argv: list[str] | None = None) -> None:
             running, auto = running and command != "stop", auto and command != "auto-report-off"
             _log(_status_text(running, auto))
             continue
+        if command == "delete-folder":
+            running = False
+            _log("Job-Schleife für Bereinigung angehalten.")
         if problem:
             _log(f"{command!r} während der Pause nicht möglich: {problem}")
             continue
@@ -1572,6 +1885,8 @@ def main(argv: list[str] | None = None) -> None:
                 _report("manual")
             elif command == "create-folders":
                 _create_folders()
+            elif command == "delete-folder":
+                pending_delete = _begin_delete()
             else:
                 _update_index()
             if command in ("run", "auto-report"):
