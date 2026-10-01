@@ -28,6 +28,7 @@ field_names = {
     "userpath": "userpath",
     "status_flags": "status_flags",
     "backups": "display_backups",
+    "size": "filesize",
 }
 stages = ("restore", "transcode", "qc")  # Also the stage folder names.
 stage_labels = {"restore": "Restore", "transcode": "Transcode", "qc": "QC"}
@@ -861,6 +862,10 @@ def _merge_hit(hit: dict) -> dict:
         raw = "; ".join(value for row in rows for value in row["backups"])
         hit["invalid"] = (f"keine LTO-Tapenummer; {field_names['backups']}={raw!r}", None)
         return hit
+    sizes = [value for row in rows for value in row["size"]]
+    if not sizes or not all(value.isascii() and value.isdecimal() for value in sizes):
+        hit["invalid"] = (f"Dateigröße fehlt oder ungültig; {field_names['size']}={'; '.join(sizes)!r}", None)
+        return hit
     names = {_file_name(path).casefold(): _file_name(path) for row in rows for path in row["userpath"] if _file_name(path)}
     hashes = {value.casefold(): value for row in rows for value in row["hash"]}
     masters, hash_list = (sorted(values.values(), key=str.casefold) for values in (names, hashes))
@@ -869,7 +874,7 @@ def _merge_hit(hit: dict) -> dict:
         f"{field_names['userpath']}={_joined(masters)}, {field_names['hash']}={_joined(hash_list)}, "
         f"{field_names['backups']}={_joined(tapes.values())}")
     hit.update({field: seen[field][0] for field in fields}, hashes=hash_list, masters=masters,
-               lto_tapes=list(tapes.values()), restore_problem=restore_problem)
+               lto_tapes=list(tapes.values()), master_size=sum(map(int, sizes)), restore_problem=restore_problem)
     return hit
 
 
@@ -903,11 +908,11 @@ def _search_clips(mapping: list[dict], ctx: dict) -> dict[str, list[dict]]:
             raise RuntimeError(f"API-Suche für {name!r} unvollständig; Zustand unverändert: {error}")
         placeholders = 0
         for number, row in enumerate(matches, 1):
-            if len(row) != len(api_fields) or not all(isinstance(value, str) for value in row):
+            if len(row) != len(api_fields) or not all(isinstance(value, str) or type(value) is int for value in row):
                 _issue(ctx, "skipped", invalid_category, f"{name}#{number}",
                        f"Kollektion={name}, Trefferzeile={number}: Rückgabefelder unvollständig oder kein Text; {_raw_text(row)}")
                 continue
-            values = {key: _values(raw) for key, raw in zip(keys, row)}
+            values = {key: _values(str(raw)) for key, raw in zip(keys, row)}
             if "placeholder" in (flag.casefold() for flag in values["status_flags"]):
                 placeholders += 1
                 continue  # Placeholders are ignored completely, also in the error report.
@@ -1045,7 +1050,7 @@ def _classify(clip_id: str, hits: list[dict]) -> tuple[dict | None, dict | None]
 def _new_clip(clip_id: str, hit: dict) -> dict:
     return {"clip_id": clip_id, "collection": hit["collection"], "identifier": hit["identifier"],
             "title": hit["title"], "clip_name_with_extension": hit["clip_name"], "filehashes": hit["hashes"],
-            "master_files": hit["masters"], "lto_tapes": hit["lto_tapes"], "status": "wartet", "active": True, "ready": False, "stage": "restore",
+            "master_files": hit["masters"], "lto_tapes": hit["lto_tapes"], "master_size": hit["master_size"], "status": "wartet", "active": True, "ready": False, "stage": "restore",
             "queued_at": _stamp(), "preset": None, "job": None, "job_count": 0, "attempts": 0,
             "files": {"master": None, "proxy": None},
             "issues": {"file": None, "sticky": None}, "history": []}
