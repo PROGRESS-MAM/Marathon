@@ -1,6 +1,7 @@
 # --------- IMPORTS ---------
 import argparse
 import configparser
+import copy
 import json
 import os
 import queue
@@ -26,7 +27,7 @@ field_names = {
     "status_flags": "status_flags",
 }
 stages = ("restore", "transcode", "qc")  # Also the stage folder names.
-stage_labels = {"restore": "LTO", "transcode": "Transcode", "qc": "QC"}
+stage_labels = {"restore": "Restore", "transcode": "Transcode", "qc": "QC"}
 limit_keys = {stage: stage_labels[stage].casefold() for stage in stages}
 job_boxes = ("offen", "laufend", "fertig", "archiv", "zurueckgezogen", "ausgang")
 inbox, outbox, unknown_dir, worker_dir = "eingang", "ausgang", "unbekannt", "worker"
@@ -42,31 +43,45 @@ summary_name = "Summe"
 invalid_path_chars = frozenset('<>:"/\\|?*' + "".join(map(chr, range(32))))
 reserved_names = frozenset({"CON", "PRN", "AUX", "NUL", *(f"{kind}{number}" for kind in ("COM", "LPT") for number in range(1, 10))})
 issue_sections = {
-    "skipped": "Gefunden, aber nicht aufgenommen (nicht in Gesamt)",
-    "inactive": "In der JSON, aber nicht mehr aktiv (nicht in Gesamt)",
+    "skipped": "Gefunden, aber nicht aufgenommen (letzter update-index, nicht in Gesamt)",
+    "deviation": "Suche weicht von der JSON ab (letzter update-index, nicht übernommen)",
+    "inactive": "In der JSON, aber nicht aktiv (nicht in Gesamt)",
     "note": "Hinweise (betroffene Clips zählen weiter)",
 }
-problem_categories = {  # kind: (category for new clips, category for clips in the JSON, clip status)
-    "missing": (None, "Verloren – nicht mehr in der Suche", "verloren"),
-    "placeholder": (None, "Jetzt Platzhalter", "platzhalter"),
-    "multi": ("Clip-ID in mehreren Kollektionen", "Clip-ID in mehreren Kollektionen (nach Aufnahme)", "duplikat"),
+index_sections = ("skipped", "deviation")
+problem_categories = {  # kind: (category for new clips, category for clips already in the JSON)
+    "missing": (None, "Nicht mehr in der Suche"),
+    "placeholder": ("Platzhalter", "In der Suche jetzt Platzhalter"),
+    "multi": ("Clip-ID in mehreren Kollektionen", "Clip-ID jetzt in mehreren Kollektionen"),
     "invalid": ("Unvollständige oder widersprüchliche Metadaten",
-                "Unvollständige oder widersprüchliche Metadaten (nach Aufnahme)", "ungueltig"),
-    "duplicate": ("Doppelter Identifier/Titel", "Doppelter Identifier/Titel (nach Aufnahme)", "duplikat"),
-    "restore": ("Dateinamen und Hashes passen nicht zusammen",
-                "Dateinamen und Hashes passen nicht zusammen (nach Aufnahme)", "ungueltig"),
+                "Metadaten in der Suche jetzt unvollständig oder widersprüchlich"),
+    "duplicate": ("Doppelter Identifier/Titel", None),
+    "restore": ("Dateinamen und Hashes passen nicht zusammen", None),
 }
+metadata_changed = "Metadaten in der Suche geändert"
 lost_proxy, lost_master = "Verloren – Proxy fehlt", "Verloren – Master fehlt vor Transcode"
 qc_rejected, job_failed = "QC nicht bestanden", "Job endgültig fehlgeschlagen"
-status_codes = {existing: code for _, existing, code in problem_categories.values()} | {
-    lost_proxy: "verloren", lost_master: "verloren", qc_rejected: "qc_abgelehnt", job_failed: "fehlgeschlagen"}
+status_codes = {lost_proxy: "verloren", lost_master: "verloren", qc_rejected: "qc_abgelehnt", job_failed: "fehlgeschlagen"}
+commands_help = {
+    "run": "Ordner und JSON anlegen, falls sie fehlen; dann Job-Schleife starten",
+    "stop": "Job-Schleife anhalten",
+    "auto-report": "Täglichen Auto-Bericht einschalten (ab auto_report_time)",
+    "auto-report-off": "Täglichen Auto-Bericht ausschalten",
+    "report": "Manuellen Bericht sofort erstellen",
+    "create-folders": "Ordnerstruktur aller Kollektionen anlegen",
+    "update-index": "Neue Suche; neue Clips aufnehmen, Abweichungen nur melden",
+    "status": "Anzeigen, was eingeschaltet ist",
+    "help": "Diese Übersicht",
+    "quit": "Marathon beenden",
+}
+command_aliases = {"exit": "quit", "manual-report": "report", "manueller-report": "report", "auto-report-on": "auto-report"}
 missing_job_grace = timedelta(minutes=30)  # Before a vanished job file is recreated.
 tracked_fields = {"collection": "Kollektion", "identifier": "Identifier", "title": "Titel",
                   "clip_name_with_extension": "Clipname", "master_files": "Master-Dateien", "filehashes": "Hashes"}
 
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "1.0.1"
+app_version = "1.1.0"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 log_dir = project_dir / "log"
@@ -78,9 +93,9 @@ state_path = state_dir / "marathon.json"
 lock_path = state_dir / "marathon.lock"
 main_log = log_dir / "marathon.log"
 config_schema = {  # section: {key: kind}; all values and their explanations live in res/config.ini
-    "paths": {"root_path": "text", "defa_dir": "name", "aqc_dir": "name", "work_dir": "name", "defa_marker": "text",
+    "paths": {"root_path": "text", "defa_dir": "name", "work_dir": "name", "defa_marker": "text",
               "proxy_prefix": "text", "cred_file": "text", "mapping_file": "text", "priority_file": "text"},
-    "operation": {"report_only": "bool", "auto_report_time": "time", "retry_minutes": "number"},
+    "operation": {"auto_report_time": "time", "retry_minutes": "number"},
     "timing": {"cycle_seconds": "number", "max_job_attempts": "number", "stable_minutes": "count"},
     "limits": {key: "count" for key in limit_keys.values()},
     "heartbeat": {"worker_timeout_minutes": "number", "max_job_hours": "number"},
@@ -127,10 +142,6 @@ def _log(message: str) -> None:
 def _parse_value(kind: str, raw: str):
     if not raw:
         raise ValueError("fehlt oder ist leer")
-    if kind == "bool":
-        if raw.casefold() not in ("true", "false"):
-            raise ValueError("erwartet true oder false")
-        return raw.casefold() == "true"
     if kind in ("count", "number"):
         minimum = int(kind == "number")
         if not raw.isdecimal() or int(raw) < minimum:
@@ -247,10 +258,6 @@ def _master_folder(collection: str, clip_id: str) -> str:
 
 def _qc_inbox(collection: str) -> str:
     return f"{_stage_folder(collection, 'qc')}/{inbox}"
-
-
-def _aqc_folder() -> str:
-    return f"{cfg['defa_dir']}/{cfg['aqc_dir']}"
 
 
 def _path(relative: str) -> Path:
@@ -480,16 +487,24 @@ def _stable(state: dict, ctx: dict, relative: str, size: int) -> bool:
     return _age(entry["since"]) >= timedelta(minutes=cfg["stable_minutes"])
 
 
-def _ensure_folders(mapping: list[dict]) -> None:
-    folders = [cfg["work_dir"], f"{cfg['work_dir']}/{worker_dir}"]
+def _ensure_folders(mapping: list[dict], force: bool = False) -> int:
+    """Create missing work, stage and unknown folders; returns how many were created."""
+    folders = {cfg["work_dir"], f"{cfg['work_dir']}/{worker_dir}"}
     for entry in mapping:
+        folders.add(f"{_final_folder(entry['name'])}/{unknown_dir}")
         for stage in stages:
             base = _stage_folder(entry["name"], stage)
-            folders += [f"{base}/{box}" for box in job_boxes] + ([f"{base}/{inbox}"] if stage != "restore" else [])
-    for relative in folders:
-        if relative not in ensured_folders:
-            _path(relative).mkdir(parents=True, exist_ok=True)
+            folders |= {f"{base}/{box}" for box in (*job_boxes, *((inbox,) if stage != "restore" else ()))}
+    parts = [relative.split("/") for relative in folders]
+    folders |= {"/".join(items[:end]) for items in parts for end in range(1, len(items))}
+    created = 0
+    for relative in sorted(folders):  # Parents sort before their children.
+        if force or relative not in ensured_folders:
+            if not _path(relative).is_dir():
+                _path(relative).mkdir(parents=True, exist_ok=True)
+                created += 1
             ensured_folders.add(relative)
+    return created
 
 
 # --------- FUNC: PRIORITY ---------
@@ -636,17 +651,10 @@ def _proxy_keys(name: str) -> list[tuple[str, str]] | None:
 def _proxy_index(ctx: dict, folder: str) -> dict:
     if folder in ctx["indexes"]:
         return ctx["indexes"][folder]
-    strict, index = folder == _aqc_folder(), defaultdict(list)
+    index = defaultdict(list)
     for name, size in _listing(ctx, folder).values():
-        if _ignored(name) or name.casefold().endswith(protocol_suffixes):
-            continue
-        keys = _proxy_keys(name)
-        if keys is None or not size:
-            if strict:
-                category = "AQC-Dateiname nicht zuordenbar" if keys is None else "AQC-Datei noch leer (nicht gezählt)"
-                _issue(ctx, "note", category, name, f"Datei={name!r}")
-            continue
-        for key in keys:
+        skip = _ignored(name) or name.casefold().endswith(protocol_suffixes) or not size
+        for key in (None if skip else _proxy_keys(name)) or ():
             if name not in index[key]:
                 index[key].append(name)
     ctx["indexes"][folder] = index
@@ -659,7 +667,8 @@ def _lookup(ctx: dict, folder: str, identifier: str, title: str) -> list[str]:
 
 # --------- FUNC: STATE ---------
 def _empty_state() -> dict:
-    return {"schema_version": 3, "priority": None, "notes": [], "workers": {}, "files_seen": {}, "clips": {}}
+    return {"schema_version": 4, "priority": None, "notes": [], "index": {"updated_at": None, "issues": []},
+            "workers": {}, "files_seen": {}, "clips": {}}
 
 
 def _clip_problem(clip_id: str, clip) -> str | None:
@@ -686,11 +695,17 @@ def _load_state() -> dict:
     version = state.get("schema_version") if isinstance(state, dict) else None
     if version in (1, 2):
         raise ValueError(f"Zustand hat ein altes Format (Version {version}). Bitte state/marathon.json löschen; "
-                         "Marathon sammelt den Stand beim nächsten Bericht aus den Ordnern neu ein.")
-    if version != 3 or not isinstance(state.get("clips"), dict):
+                         "'run' oder 'update-index' baut den Index neu auf.")
+    if version not in (3, 4) or not isinstance(state.get("clips"), dict):
         raise ValueError("Unbekanntes Zustandsformat; keine Aktualisierung.")
     for key, default in _empty_state().items():
         state.setdefault(key, default)
+    if version == 3:  # Version 3 tracked search problems per clip; now the JSON itself is the index.
+        state["schema_version"] = 4
+        for clip in state["clips"].values():
+            for key, item in (("issues", "search"), ("job", "outdated")):
+                if isinstance(clip, dict) and isinstance(clip.get(key), dict):
+                    clip[key].pop(item, None)
     for clip_id, clip in state["clips"].items():
         problem = _clip_problem(clip_id, clip)
         if problem:
@@ -731,7 +746,7 @@ def _new_clip(clip_id: str, hit: dict) -> dict:
             "master_files": hit["masters"], "status": "wartet", "active": True, "ready": False, "stage": "restore",
             "queued_at": _stamp(), "preset": None, "job": None, "job_count": 0, "attempts": 0,
             "files": {"master": None, "proxy": None},
-            "issues": {"search": None, "file": None, "sticky": None}, "history": []}
+            "issues": {"file": None, "sticky": None}, "history": []}
 
 
 def _missing_masters(ctx: dict, collection: str, clip_id: str, names: list[str]) -> list[str] | None:
@@ -744,8 +759,7 @@ def _missing_masters(ctx: dict, collection: str, clip_id: str, names: list[str])
 def _admit(clips: dict, clip_id: str, hit: dict, ctx: dict) -> None:
     collection, identifier, title = hit["collection"], hit["identifier"], hit["title"]
     text = f"Clip_ID={clip_id}, Kollektion={collection}, Clipname={hit['clip_name']}"
-    places = [(_final_folder(collection), "Zielordner"), (_qc_inbox(collection), "QC-Eingang"),
-              *([(_aqc_folder(), "AQC")] if _is_defa(collection) else [])]
+    places = [(_final_folder(collection), "Zielordner"), (_qc_inbox(collection), "QC-Eingang")]
     found = [(folder, source, _lookup(ctx, folder, identifier, title)) for folder, source in places]
     crowded = [f"{source}: {', '.join(names)}" for _, source, names in found if len(names) > 1]
     if crowded:
@@ -775,62 +789,51 @@ def _admit(clips: dict, clip_id: str, hit: dict, ctx: dict) -> None:
         if missing:
             _issue(ctx, "note", "Master unvollständig im Transcode-Eingang – neuer Restore", clip_id,
                    f"{text}: fehlend {', '.join(missing)}")
-        _event(clip, "Aufgenommen – wartet auf LTO-Restore", ", ".join(hit["masters"]))
+        _event(clip, "Aufgenommen – wartet auf Restore", ", ".join(hit["masters"]))
     clips[clip_id] = clip
 
 
-def _update_metadata(clip: dict, hit: dict, ctx: dict) -> None:
+def _changes(clip: dict, hit: dict) -> str:
     new = {"collection": hit["collection"], "identifier": hit["identifier"], "title": hit["title"],
            "clip_name_with_extension": hit["clip_name"], "master_files": hit["masters"], "filehashes": hit["hashes"]}
-    changed = [f"{label}: {clip[key]!r} → {new[key]!r}" for key, label in tracked_fields.items() if clip[key] != new[key]]
-    clip.update(new)
-    if changed:
-        detail = "; ".join(changed)
-        _event(clip, "Metadaten geändert", detail)
-        if clip["job"]:
-            clip["job"]["outdated"] = True
-        _issue(ctx, "note", "Metadaten geändert", clip["clip_id"], f"{_clip_text(clip)}: {detail}")
+    return "; ".join(f"{label}: {clip[key]!r} → {new[key]!r}" for key, label in tracked_fields.items() if clip[key] != new[key])
 
 
 def _reconcile(state: dict, found: dict[str, list[dict]], ctx: dict) -> None:
+    """Admit new clips; for clips already in the JSON differences are only reported, the JSON stays the index."""
     clips = state["clips"]
     classified = {clip_id: _classify(found.get(clip_id, [])) for clip_id in {*found, *clips}}
     groups = defaultdict(list)
     for clip_id, (hit, _) in classified.items():
-        if hit:
-            groups[(_normalize(hit["identifier"]), _normalize(hit["title"]))].append(clip_id)
-    for group in groups.values():
-        if len(group) > 1:
-            text = "Clip_IDs: " + ", ".join(sorted(group, key=int))
-            for clip_id in group:
-                classified[clip_id] = (classified[clip_id][0], ("duplicate", text))
+        source = clips.get(clip_id) or hit
+        if source:
+            groups[(_normalize(source["identifier"]), _normalize(source["title"]))].append(clip_id)
+    for group in (group for group in groups.values() if len(group) > 1):
+        text = "Clip_IDs: " + ", ".join(sorted(group, key=int))
+        for clip_id in (clip_id for clip_id in group if clip_id not in clips):
+            classified[clip_id] = (None, ("duplicate", text))
     for clip_id in sorted(classified, key=int):
-        hit, problem = classified[clip_id]
-        clip = clips.get(clip_id)
-        if clip is None:
-            if problem is None:
-                _admit(clips, clip_id, hit, ctx)
-            elif problem_categories[problem[0]][0]:
-                collections = ", ".join(sorted(item["collection"] for item in found[clip_id]))
-                _issue(ctx, "skipped", problem_categories[problem[0]][0], clip_id,
-                       f"Clip_ID={clip_id}, Kollektion={collections}: {problem[1]}")
-            continue
-        if hit:
-            _update_metadata(clip, hit, ctx)
-            if problem is None and clip["stage"] == "restore" and hit["restore_problem"]:
-                problem = ("restore", hit["restore_problem"])
-        _set_issue(clip, "search", *((problem_categories[problem[0]][1], problem[1]) if problem else ()))
+        (hit, problem), clip = classified[clip_id], clips.get(clip_id)
+        if clip is None and problem is None:
+            _admit(clips, clip_id, hit, ctx)
+        elif clip is None:
+            collections = ", ".join(sorted(item["collection"] for item in found[clip_id]))
+            _issue(ctx, "skipped", problem_categories[problem[0]][0], clip_id,
+                   f"Clip_ID={clip_id}, Kollektion={collections}: {problem[1]}")
+        elif problem or (detail := _changes(clip, hit)):
+            category = problem_categories[problem[0]][1] if problem else metadata_changed
+            _issue(ctx, "deviation", category, clip_id, f"{_clip_text(clip)}: {problem[1] if problem else detail}")
 
 
 # --------- FUNC: WORKERS ---------
 # Worker rules (provisional until the tools exist; paths are relative to the share root with "/" as separator):
 # - Heartbeat at least once a minute: <root>/<work_dir>/worker/<worker>.json, written via temporary name + rename:
-#   {"worker": str, "stage": "LTO" | "Transcode" | "QC", "host": str, "job_id": str | null, "beat": <changes each time>}
+#   {"worker": str, "stage": "Restore" | "Transcode" | "QC", "host": str, "job_id": str | null, "beat": <changes each time>}
 # - Read <root>/<work_dir>/priority.json and walk the collections of the own stage in the given order.
 # - Take the first *.json in "offen" (sorted by name) by renaming it into "laufend/<worker>/";
 #   if the rename fails because the file is gone, another worker was faster: try the next file.
 # - Read inputs only where the job says; write results only into the job's output_folder (ausgang/<job_id>).
-#   LTO: all names from "files" (restored via "hashes"); Transcode: exactly one proxy named by the proxy scheme,
+#   Restore: all names from "files" (restored via "hashes"); Transcode: exactly one proxy named by the proxy scheme,
 #   otherwise the job fails; QC: never move the proxy. Protocol files (.log/.txt/.json) are archived.
 # - Leave the job file in "laufend"; write the report as "fertig/<job_id>.json" via a temporary name that does not
 #   end in ".json", then rename: {"job_id": str, "status": "ok" | "failed" | "rejected" (QC only),
@@ -1075,7 +1078,7 @@ def _withdraw(clip: dict) -> bool:
     job = clip["job"]
     if job is None:
         return True
-    if cfg["report_only"] or job["state"] == "laufend":
+    if job["state"] == "laufend":
         return False
     if job["state"] == "offen" and not _move(f"{job['folder']}/offen/{job['file']}", f"{job['folder']}/zurueckgezogen"):
         return False  # A worker took it meanwhile.
@@ -1083,21 +1086,6 @@ def _withdraw(clip: dict) -> bool:
     clip["job"] = None
     _event(clip, "Job zurückgezogen", job["file"])
     return True
-
-
-def _discover(clip: dict, ctx: dict) -> None:
-    job = clip["job"]
-    if clip["ready"] or clip["stage"] == "qc" or not _is_defa(clip["collection"]) or (job and job["state"] == "laufend"):
-        return
-    aqcs = _lookup(ctx, _aqc_folder(), clip["identifier"], clip["title"])
-    if len(aqcs) > 1:
-        _issue(ctx, "note", "Mehrere AQC-Dateien", clip["clip_id"], f"{_clip_text(clip)}: {', '.join(aqcs)}")
-    elif aqcs and _withdraw(clip):
-        clip["files"]["proxy"] = _file_entry(_aqc_folder(), aqcs[0], "AQC")
-        clip["attempts"] = 0
-        _set_issue(clip, "sticky")  # A failed LTO/Transcode stage is skipped by the AQC proxy.
-        _enter(clip, "qc")
-        _issue(ctx, "note", "AQC-Proxy gefunden – direkt an QC", clip["clip_id"], f"{_clip_text(clip)}: {aqcs[0]}")
 
 
 def _check_files(clip: dict, ctx: dict) -> tuple[str, str] | tuple[()]:
@@ -1120,7 +1108,7 @@ def _check_files(clip: dict, ctx: dict) -> tuple[str, str] | tuple[()]:
 
 
 def _update_activity(clip: dict, ctx: dict) -> None:
-    reasons = [reason for reason in (clip["issues"][kind] for kind in ("sticky", "file", "search")) if reason]
+    reasons = [reason for reason in (clip["issues"][kind] for kind in ("sticky", "file")) if reason]
     active = not reasons
     if active != clip["active"]:
         if active:
@@ -1137,7 +1125,7 @@ def _update_activity(clip: dict, ctx: dict) -> None:
 
 
 def _status(clip: dict) -> str:
-    for kind in ("sticky", "file", "search"):
+    for kind in ("sticky", "file"):
         if clip["issues"][kind]:
             return status_codes.get(clip["issues"][kind]["category"], "inaktiv")
     if clip["ready"]:
@@ -1145,7 +1133,7 @@ def _status(clip: dict) -> str:
     return "laufend" if clip["job"] and clip["job"]["state"] == "laufend" else "wartet"
 
 
-def _sweep_final(state: dict, mapping: list[dict], ctx: dict) -> None:
+def _sweep_final(state: dict, mapping: list[dict], ctx: dict, writing: bool) -> None:
     known = defaultdict(set)
     for clip in state["clips"].values():
         if clip["ready"] and clip["files"]["proxy"]:
@@ -1155,8 +1143,9 @@ def _sweep_final(state: dict, mapping: list[dict], ctx: dict) -> None:
             if key in known[final] or _ignored(name):
                 continue
             relative = f"{final}/{name}"
-            if cfg["report_only"]:
-                _issue(ctx, "note", "Unbekannte Datei im Zielordner (report_only – nicht verschoben)", relative, relative)
+            if not writing:
+                _issue(ctx, "note", "Unbekannte Datei im Zielordner (wird bei run nach unbekannt verschoben)",
+                       relative, relative)
                 continue
             if not _stable(state, ctx, relative, size):
                 continue
@@ -1189,11 +1178,6 @@ def _leftovers(state: dict, mapping: list[dict], ctx: dict) -> None:
         for key, (name, _) in sorted(_listing(ctx, folder).items()):
             if (folder, key) not in proxies and not _ignored(name):
                 _issue(ctx, "note", "Datei ohne passenden Clip (QC-Eingang)", f"{folder}/{key}", f"{folder}/{name}")
-    if any(_is_defa(entry["name"]) for entry in mapping):
-        folder = _aqc_folder()
-        for key, (name, size) in sorted(_listing(ctx, folder).items()):
-            if size and _proxy_keys(name) and (folder, key) not in proxies:
-                _issue(ctx, "note", "AQC-Datei ohne aufgenommenen Clip", f"{folder}/{key}", f"{folder}/{name}")
 
 
 def _job_payload(clip: dict, job_id: str, folder: str) -> dict:
@@ -1226,25 +1210,17 @@ def _create_job(clip: dict) -> None:
     _event(clip, f"{stage_labels[stage]}-Job erstellt", job_id)
 
 
-def _ready_for_job(state: dict, clip: dict, ctx: dict) -> bool:
-    proxy = clip["files"]["proxy"]
-    if clip["stage"] != "qc" or proxy["folder"] != _aqc_folder():
-        return True
-    item = _listing(ctx, proxy["folder"]).get(proxy["name"].casefold())
-    return item is not None and _stable(state, ctx, f"{proxy['folder']}/{proxy['name']}", item[1])
-
-
 def _schedule(state: dict, prio: dict[str, list[str]], ctx: dict) -> None:
     clips = state["clips"].values()
     for clip in clips:
         job = clip["job"]
         expected = None if clip["ready"] else _stage_folder(clip["collection"], clip["stage"])
-        if job and (not clip["active"] or job.get("outdated") or job["folder"] != expected or job["stage"] != clip["stage"]):
+        if job and (not clip["active"] or job["folder"] != expected or job["stage"] != clip["stage"]):
             _withdraw(clip)
     for stage in stages:
         ranks = {name: rank for rank, name in enumerate(prio[stage])}
         pool = sorted((clip for clip in clips if clip["active"] and not clip["ready"] and clip["stage"] == stage and
-                       (clip["job"]["state"] == "offen" if clip["job"] else _ready_for_job(state, clip, ctx))),
+                       (not clip["job"] or clip["job"]["state"] == "offen")),
                       key=lambda clip: (ranks.get(clip["collection"], len(ranks)), clip["queued_at"]))
         limit = cfg[limit_keys[stage]]
         for clip in pool[limit:]:
@@ -1255,8 +1231,9 @@ def _schedule(state: dict, prio: dict[str, list[str]], ctx: dict) -> None:
                 _create_job(clip)
 
 
-def _process(state: dict, mapping: list[dict], prio: dict[str, list[str]], ctx: dict) -> None:
-    clips, writing = state["clips"], not cfg["report_only"]
+def _process(state: dict, mapping: list[dict], prio: dict[str, list[str]], ctx: dict, writing: bool) -> None:
+    """Evaluate all clips; writing=False only reads the share (reports)."""
+    clips = state["clips"]
     _read_workers(state)
     if writing:
         _ensure_folders(mapping)
@@ -1275,10 +1252,9 @@ def _process(state: dict, mapping: list[dict], prio: dict[str, list[str]], ctx: 
         for folder in folders:
             _sweep_unknown_jobs(folder, known, ctx)
     for clip in clips.values():
-        _discover(clip, ctx)
         _set_issue(clip, "file", *_check_files(clip, ctx))
         _update_activity(clip, ctx)
-    _sweep_final(state, mapping, ctx)
+    _sweep_final(state, mapping, ctx, writing)
     if writing:
         _schedule(state, prio, ctx)
     for clip in clips.values():
@@ -1368,16 +1344,16 @@ def _summary_lines(issues: list[dict]) -> list[str]:
     return lines
 
 
-def _format_errors(issues: list[dict], when: datetime) -> str:
-    lines = [f"{app_name} {app_version} | Fehlerbericht | {when.isoformat(timespec='seconds')}", "", *_summary_lines(issues)]
-    for section, title in issue_sections.items():
+def _format_errors(issues: list[dict], when: datetime, title: str = "Fehlerbericht") -> str:
+    lines = [f"{app_name} {app_version} | {title} | {when.isoformat(timespec='seconds')}", "", *_summary_lines(issues)]
+    for section, heading in issue_sections.items():
         grouped = defaultdict(list)
         for item in issues:
             if item["section"] == section:
                 grouped[item["category"]].append(item["detail"])
         for category in sorted(grouped, key=str.casefold):
             details = sorted(dict.fromkeys(grouped[category]), key=str.casefold)
-            lines += ["", f"=== {title.split(' (')[0]} – {category} ({len(details)}) ===", *details]
+            lines += ["", f"=== {heading.split(' (')[0]} – {category} ({len(details)}) ===", *details]
     return "\n".join(lines) + "\n"
 
 
@@ -1386,37 +1362,77 @@ def _write_new(path: Path, text: str) -> None:
         handle.write(text)
 
 
+def _file_stamp(kind: str, when: datetime) -> str:
+    return f"{kind}_{when.strftime('%Y-%m-%d_%H-%M-%S-%f')}"
+
+
+def _keep_notes(state: dict, issues: list[dict]) -> None:
+    """Keep new notes for the next report, without duplicates."""
+    known = {(item["category"], item["key"], item["detail"]) for item in state["notes"]}
+    for item in issues:
+        key = (item["category"], item["key"], item["detail"])
+        if item["section"] == "note" and key not in known:
+            state["notes"].append(item)
+            known.add(key)
+
+
+# --------- FUNC: COMMANDS ---------
+def _update_index() -> None:
+    """Search all collections; admit new clips, report differences for known clips without changing them."""
+    started = perf_counter()
+    _log("Index-Aktualisierung gestartet.")
+    mapping = _load_mapping()
+    _check_root()
+    state, ctx = _load_state(), _context()
+    before = len(state["clips"])
+    _reconcile(state, _search_clips(mapping, ctx), ctx)
+    index_issues = [item for item in ctx["issues"] if item["section"] in index_sections]
+    state["index"] = {"updated_at": _now(), "issues": index_issues}
+    _keep_notes(state, ctx["issues"])
+    state["updated_at"] = _now()
+    _save_state(state)
+    when = datetime.now().astimezone()
+    name = _file_stamp("index", when)
+    if ctx["issues"]:
+        _write_new(error_dir / f"{name}_errors.txt", _format_errors(ctx["issues"], when, "Index-Fehlerliste"))
+    counts = {section: len({item["key"] for item in index_issues if item["section"] == section}) for section in index_sections}
+    _log(f"Index aktualisiert: {len(state['clips']) - before} Clips neu aufgenommen, {len(state['clips'])} in der JSON; "
+         f"{counts['skipped']} nicht aufgenommen; {counts['deviation']} Abweichungen"
+         f"{f'; Details: errors/{name}_errors.txt' if ctx['issues'] else ''}; Dauer: {perf_counter() - started:.1f} s.")
+
+
 def _report(kind: str) -> Path:
+    """Report from the JSON and the folders; no search and no changes on the share."""
     started = perf_counter()
     _log(f"{kind}-Bericht gestartet.")
     mapping = _load_mapping()
     _check_root()
-    state = _load_state()
-    ctx = _context()
-    ctx["issues"].extend(state["notes"])
-    state["notes"] = []
+    if not state_path.exists():
+        raise RuntimeError("Noch keine JSON – zuerst 'update-index' oder 'run'.")
+    state, ctx = _load_state(), _context()
+    ctx["issues"].extend([*state["index"]["issues"], *state["notes"]])
     prio = _priority(mapping, state, ctx)
-    found = _search_clips(mapping, ctx)
-    _reconcile(state, found, ctx)
-    _process(state, mapping, prio, ctx)
+    view = copy.deepcopy(state)  # The report only looks; jobs and moves stay with 'run'.
+    _process(view, mapping, prio, ctx, writing=False)
     ctx["listings"].clear()
     ctx["indexes"].clear()
-    _leftovers(state, mapping, ctx)
-    totals = _totals(state, mapping)
+    _leftovers(view, mapping, ctx)
+    totals = _totals(view, mapping)
     try:
         previous = _read_previous(_previous(kind))
     except (OSError, UnicodeError, ValueError) as exc:
         previous = {}
         _issue(ctx, "note", "Vorbericht nicht lesbar – keine Deltas", "previous", str(exc))
     when = datetime.now().astimezone()
-    name = f"{kind}_{when.strftime('%Y-%m-%d_%H-%M-%S-%f')}"
-    watch, workers = _watch_lines(state), _worker_lines(state)
-    text = _render(kind, when, totals, prio, previous) + "\n" + "\n".join(_summary_lines(ctx["issues"])) + "\n"
+    name = _file_stamp(kind, when)
+    watch, workers = _watch_lines(view), _worker_lines(view)
+    text = _render(kind, when, totals, prio, previous) + f"\nIndex-Stand: {state['index']['updated_at'] or 'unbekannt'}\n\n"
+    text += "\n".join(_summary_lines(ctx["issues"])) + "\n"
     text += f"\nAuffällige laufende Jobs: {len(watch)}\n" + "".join(f"{line}\n" for line in watch)
     text += f"\nWorker (Heartbeat): {len(workers)}\n" + "".join(f"{line}\n" for line in workers)
     if ctx["issues"]:
         text += f"\nDetails: errors/{name}_errors.txt\n"
-    state["updated_at"] = _now()
+    state.update(notes=[], workers=view["workers"], updated_at=_now())
     _save_state(state)
     path = reports_dir / f"{name}.txt"
     _write_new(path, text)
@@ -1430,85 +1446,97 @@ def _report(kind: str) -> Path:
 
 def _cycle() -> str | None:
     """Run one job cycle with the loaded configuration; returns the reason if it was skipped."""
-    if cfg["report_only"]:
-        return "Job-Zyklus übersprungen: report_only ist aktiv."
     if not state_path.exists():
-        return "Job-Zyklus wartet auf den ersten Bericht (noch kein Zustand; Befehl 'report')."
+        return "Job-Zyklus übersprungen: keine JSON ('update-index' ausführen oder 'run' erneut eingeben)."
     mapping = _load_mapping()
     _check_root()
-    state = _load_state()
-    ctx = _context()
-    prio = _priority(mapping, state, ctx)
-    _process(state, mapping, prio, ctx)
-    known = {(item["category"], item["key"], item["detail"]) for item in state["notes"]}
-    for item in ctx["issues"]:
-        if item["section"] == "note" and (item["category"], item["key"], item["detail"]) not in known:
-            state["notes"].append(item)
-            known.add((item["category"], item["key"], item["detail"]))
+    state, ctx = _load_state(), _context()
+    _process(state, mapping, _priority(mapping, state, ctx), ctx, writing=True)
+    _keep_notes(state, ctx["issues"])
     state["updated_at"] = _now()
     _save_state(state)
     return None
+
+
+def _create_folders() -> None:
+    mapping = _load_mapping()
+    _check_root()
+    created = _ensure_folders(mapping, force=True)
+    _log(f"Ordnerstruktur für {len(mapping)} Kollektionen geprüft: {created} Ordner neu angelegt.")
+
+
+def _start_run() -> None:
+    """Quick start: create missing folders and build the JSON if it does not exist yet."""
+    _create_folders()
+    if not state_path.exists():
+        _log("Noch keine JSON – Index wird aus der Suche aufgebaut.")
+        _update_index()
 
 
 def _auto_due(now: datetime) -> bool:
     return now.time() >= cfg["auto_report_time"] and not any(reports_dir.glob(f"auto_{now:%Y-%m-%d}_*.txt"))
 
 
+def _command(raw: str) -> str:
+    key = "-".join(raw.casefold().replace("_", " ").replace("-", " ").split())
+    return command_aliases.get(key, key)
+
+
+def _help_text() -> str:
+    return "Befehle:\n" + "\n".join(f"  {name:<16} {text}" for name, text in commands_help.items())
+
+
+def _status_text(running: bool, auto: bool) -> str:
+    when = cfg.get("auto_report_time")
+    auto_text = (f"an (täglich ab {when:%H:%M})" if when else "an") if auto else "aus"
+    return f"Status: Job-Schleife {'läuft' if running else 'aus'}; Auto-Bericht {auto_text}."
+
+
 def _console(commands: queue.Queue[str]) -> None:
     while True:
         try:
-            command = input("Marathon> ").strip().casefold()
+            command = _command(input("Marathon> "))
         except EOFError:
             return
         commands.put(command)
-        if command in ("quit", "exit"):
+        if command == "quit":
             return
 
 
 # --------- MAIN ---------
 def main(argv: list[str] | None = None) -> None:
-    parser = argparse.ArgumentParser(description="Marathon: Suchabgleich, Job-Steuerung und Berichte")
-    modes = parser.add_mutually_exclusive_group()
-    modes.add_argument("--manual", action="store_true", help="Manuellen Bericht erstellen und beenden")
-    modes.add_argument("--auto-once", action="store_true", help="Auto-Bericht erstellen und beenden")
-    modes.add_argument("--cycle-once", action="store_true", help="Einen Job-Zyklus ausführen und beenden")
-    args = parser.parse_args(argv)
+    parser = argparse.ArgumentParser(description="Marathon: Index, Job-Steuerung und Berichte", epilog=_help_text(),
+                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("commands", nargs="*", metavar="befehl", help="Befehle, die direkt nach dem Start laufen")
+    startup = [_command(item) for item in parser.parse_args(argv).commands]
+    unknown = [item for item in startup if item not in commands_help]
+    if unknown:
+        parser.error(f"Unbekannte Befehle: {', '.join(unknown)}")
     _prepare()
     _acquire_lock()
     _log(f"{app_name} {app_version} gestartet.")
-    if args.manual or args.auto_once or args.cycle_once:
-        problem = _load_config()
-        if problem:
-            raise RuntimeError(problem)
-        if args.cycle_once:
-            skipped = _cycle()
-            if skipped:
-                _log(skipped)
-        else:
-            _report("manual" if args.manual else "auto")
-        return
     commands: queue.Queue[str] = queue.Queue()
-    threading.Thread(target=_console, args=(commands,), daemon=True).start()
-    _log("Marathon läuft. 'report' = manueller Bericht, 'quit' = beenden.")
-    next_retry, next_cycle = None, datetime.now().astimezone()
-    last_problem, last_mode, last_skip = None, None, None
+    for item in startup:
+        commands.put(item)
+    if "quit" not in startup:
+        threading.Thread(target=_console, args=(commands,), daemon=True).start()
+    _log("Marathon wartet auf Befehle ('help' zeigt alle).")
+    running = auto = False
+    next_cycle = next_retry = last_problem = last_skip = None
     while True:
         problem = _load_config()
         if problem != last_problem:
-            _log(problem or "Konfiguration gültig – Marathon arbeitet weiter.")
+            _log(problem or "Konfiguration gültig.")
             last_problem = problem
         now = datetime.now().astimezone()
-        if not problem and cfg["report_only"] != last_mode:
-            _log("report_only aktiv: keine Jobs." if cfg["report_only"] else "Jobbetrieb aktiv.")
-            last_mode = cfg["report_only"]
-        if not problem and _auto_due(now) and (next_retry is None or now >= next_retry):
+        if auto and not problem and _auto_due(now) and (next_retry is None or now >= next_retry):
             try:
                 _report("auto")
                 next_retry = None
             except Exception as exc:
                 next_retry = now + timedelta(minutes=cfg["retry_minutes"])
-                _log(f"Auto-Bericht fehlgeschlagen: {exc}; erneuter Versuch später.")
-        if not problem and not cfg["report_only"] and now >= next_cycle:
+                _log(f"Auto-Bericht fehlgeschlagen: {exc}; neuer Versuch in {cfg['retry_minutes']} min.")
+        if running and not problem and now >= next_cycle:
             try:
                 skipped = _cycle()
                 if skipped and skipped != last_skip:
@@ -1521,17 +1549,35 @@ def main(argv: list[str] | None = None) -> None:
             command = commands.get(timeout=5)
         except queue.Empty:
             continue
-        if command == "report" and problem:
-            _log(f"Kein Bericht während der Pause: {problem}")
-        elif command == "report":
-            try:
-                _report("manual")
-            except Exception as exc:
-                _log(f"Manueller Bericht fehlgeschlagen: {exc}")
-        elif command in ("quit", "exit"):
+        if command == "quit":
+            _log("Marathon beendet.")
             return
-        elif command:
-            _log("Befehle: report, quit")
+        if command not in commands_help or command == "help":
+            _log(("" if command in ("", "help") else f"Unbekannter Befehl {command!r}.\n") + _help_text())
+            continue
+        if command in ("stop", "auto-report-off", "status"):
+            running, auto = running and command != "stop", auto and command != "auto-report-off"
+            _log(_status_text(running, auto))
+            continue
+        if problem:
+            _log(f"{command!r} während der Pause nicht möglich: {problem}")
+            continue
+        try:
+            if command == "run":
+                _start_run()
+                running, next_cycle, last_skip = True, now, None
+            elif command == "auto-report":
+                auto, next_retry = True, None
+            elif command == "report":
+                _report("manual")
+            elif command == "create-folders":
+                _create_folders()
+            else:
+                _update_index()
+            if command in ("run", "auto-report"):
+                _log(_status_text(running, auto))
+        except Exception as exc:
+            _log(f"{command!r} fehlgeschlagen: {exc}")
 
 
 # --------- EXEC ---------
