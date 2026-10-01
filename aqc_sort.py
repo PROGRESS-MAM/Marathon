@@ -50,7 +50,7 @@ error_labels = {  # Order of the categories in the error list
 
 # --------- CONFIG ---------
 app_name = "AQC-Sort"
-app_version = "0.7.0"
+app_version = "0.7.1"
 project_dir = Path(__file__).resolve().parent
 config_path = project_dir / "res" / "config.ini"  # Marathon's config
 state_dir = project_dir / "state"
@@ -216,15 +216,16 @@ def _title_suffixes(rest: str, title: str) -> tuple[str, ...] | None:
     return None
 
 
-def _matches(identifier: str, rest: str, records: list[tuple]) -> list:
-    """Payloads of the records (payload, full DEFA keys, title) with the file's DEFA base whose title fits the name;
-    like the Clip Flattener the exact DEFA ID wins, then the ID suffix of a variant segment (T1 -> _1)."""
+def _matches(identifier: str, rest: str, records: list[tuple]) -> tuple[list, list]:
+    """(matches, base matches): payloads of the records (payload, full DEFA keys, title) whose title fits the name;
+    like the Clip Flattener the exact DEFA ID wins, then the ID suffix of a variant segment (T1 -> _1). Records with
+    only the same DEFA base are no match: the file's exact ID can exist outside the JSON (DEFA09240 vs. DEFA09240_A)."""
     full, base = _id_keys(identifier)
     titled = [(payload, keys, segments) for payload, keys, title in records
               if (segments := _title_suffixes(rest, title)) is not None]
     exact = [payload for payload, keys, _ in titled if full in keys]
     variant = [payload for payload, keys, segments in titled if (number := _variant(segments)) and f"{base}_{number}" in keys]
-    return exact or variant or [payload for payload, _, _ in titled]
+    return exact or variant, [payload for payload, _, _ in titled]
 
 
 # --------- FUNC: MATCHING ---------
@@ -240,7 +241,7 @@ def _blocker(clip: dict, cfg: dict) -> tuple[str, str] | None:
 
 def _scan(cfg: dict, state: dict, source: Path) -> tuple[list[tuple], list[tuple[str, str, str]], list[tuple]]:
     """(file, Clip_ID, False) for files matching one JSON clip by DEFA ID and title, errors (category, name, detail)
-    and (file, identifier, rest) of the other files for the API lookup."""
+    and (file, identifier, rest, IDs of JSON clips with the same DEFA base and title) of the other files."""
     by_base = defaultdict(list)
     for clip_id, clip in state["clips"].items():
         if identifier := str(clip.get("identifier") or "").strip():
@@ -259,13 +260,14 @@ def _scan(cfg: dict, state: dict, source: Path) -> tuple[list[tuple], list[tuple
         if not item.stat().st_size:
             errors.append(("empty", item.name, ""))
             continue
-        ids = sorted(_matches(*parts, by_base.get(_id_keys(parts[0])[1], [])), key=int)
+        ids, base_ids = _matches(*parts, by_base.get(_id_keys(parts[0])[1], []))
+        ids = sorted(ids, key=int)
         if len(ids) > 1:
             errors.append(("ambiguous", item.name, f"Clip_IDs={', '.join(ids)}"))
         elif ids:
             found.append((item, ids[0], False))
         else:
-            missing.append((item, *parts))
+            missing.append((item, *parts, [state["clips"][clip_id]["identifier"] for clip_id in base_ids]))
     return found, errors, missing
 
 
@@ -429,7 +431,8 @@ def _check_missing(cfg: dict, mapping: list[dict], state: dict,
     Marathon rightly ignores (not in the searched collections, placeholder)."""
     if not missing:
         return [], [], []
-    identifiers = list(dict.fromkeys(value for _, identifier, rest in missing for value in _search_values(identifier, rest)))
+    identifiers = list(dict.fromkeys(value for _, identifier, rest, base_ids in missing
+                                     for value in (*_search_values(identifier, rest), *base_ids)))
     _log(f"API-Suche nach {api_identifier}: {len(identifiers)} Werte für {len(missing)} Dateien ...")
     try:
         found, failure = _search_identifiers(cfg, identifiers), None
@@ -440,7 +443,7 @@ def _check_missing(cfg: dict, mapping: list[dict], state: dict,
         tb_write_log(main_log, traceback.format_exc())
     clips, skipped = state["clips"], _skipped(state)
     resolved, errors, outside, label = [], [], [], api_identifier.split()[0]
-    for item, identifier, rest in missing:
+    for item, identifier, rest, _ in missing:
         if failure:
             errors.append(("api_failed", item.name, f"{label}={identifier}\n    {failure}"))
             continue
