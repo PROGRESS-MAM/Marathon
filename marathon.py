@@ -27,6 +27,7 @@ field_names = {
     "hash": "hash",
     "userpath": "userpath",
     "status_flags": "status_flags",
+    "backups": "display_backups",
 }
 stages = ("restore", "transcode", "qc")  # Also the stage folder names.
 stage_labels = {"restore": "Restore", "transcode": "Transcode", "qc": "QC"}
@@ -42,6 +43,7 @@ queue_columns = tuple(f"Queue {stage_labels[stage]}" for stage in stages)
 count_columns = ("Gesamt", "Bereit", *queue_columns)
 columns = ("Kollektion", *prio_columns, "Gesamt", "Bereit", "%", *queue_columns)
 summary_name = "Summe"
+match_separator = "———"
 invalid_path_chars = frozenset('<>:"/\\|?*' + "".join(map(chr, range(32))))
 reserved_names = frozenset({"CON", "PRN", "AUX", "NUL", *(f"{kind}{number}" for kind in ("COM", "LPT") for number in range(1, 10))})
 issue_sections = {
@@ -80,8 +82,9 @@ commands_help = {
 }
 command_aliases = {"exit": "quit", "manual-report": "report", "manueller-report": "report", "auto-report-on": "auto-report"}
 missing_job_grace = timedelta(minutes=30)  # Before a vanished job file is recreated.
-tracked_fields = {"collection": "Kollektion", "identifier": "Identifier", "title": "Titel",
-                  "clip_name_with_extension": "Clipname", "master_files": "Master-Dateien", "filehashes": "Hashes"}
+tracked_fields = {"collection": "Kollektion", "identifier": field_names["identifier"], "title": field_names["title"],
+                  "clip_name_with_extension": field_names["clip_name"], "master_files": field_names["userpath"],
+                  "filehashes": field_names["hash"]}
 
 # --------- CONFIG ---------
 app_name = "Marathon"
@@ -350,9 +353,20 @@ def _issue(ctx: dict, section: str, category: str, key: str, detail: str) -> Non
     ctx["issues"].append({"section": section, "category": category, "key": key, "detail": detail})
 
 
-def _clip_text(clip: dict) -> str:
-    return (f"Clip_ID={clip['clip_id']}, Kollektion={clip['collection']}, "
-            f"Clipname={clip['clip_name_with_extension']}")
+def _clip_text(item: dict) -> str:
+    return (f"Kollektion={item['collection']}, {field_names['clip_id']}={item['clip_id']}, "
+            f"{field_names['identifier']}={item['identifier']}, {field_names['title']}={item['title']}")
+
+
+def _joined(values) -> str:
+    return " | ".join(values)
+
+
+def _detail(head: str, reason: str = "", matches: list[str] | None = None) -> str:
+    """Format A: one line. Format B (several matches, one expected): head, separator, one match per line."""
+    if matches:
+        return "\n".join((head, match_separator, *matches))
+    return f"{head}: {reason}" if reason else head
 
 
 def _position(clip: dict) -> str:
@@ -369,13 +383,13 @@ def _event(clip: dict, event: str, detail: str = "") -> None:
     clip["history"].append({"at": _now(), "event": event, "position": _position(clip), "detail": detail})
 
 
-def _set_issue(clip: dict, kind: str, category: str | None = None, detail: str = "") -> None:
+def _set_issue(clip: dict, kind: str, category: str | None = None, detail: str = "", matches: list[str] | None = None) -> None:
     old = clip["issues"].get(kind)
     if category is None:
         clip["issues"][kind] = None
         return
     since = old["since"] if old and old["category"] == category else _now()
-    clip["issues"][kind] = {"category": category, "detail": detail, "since": since}
+    clip["issues"][kind] = {"category": category, "detail": detail, "matches": matches, "since": since}
 
 
 def _file_entry(folder: str, name: str, source: str) -> dict:
@@ -658,10 +672,14 @@ def _rebuild_process_state(state: dict) -> dict:
         clip["issues"] = {"file": None, "sticky": None}
         found = [(folder, source, _lookup(ctx, folder, clip["identifier"], clip["title"])) for folder, source in
                  [(_final_folder(collection), "Zielordner"), (_qc_inbox(collection), "QC-Eingang")]]
-        duplicate = len(groups[(_normalize(clip["identifier"]), _normalize(clip["title"]))]) > 1
-        crowded = [f"{folder}: {', '.join(names)}" for folder, _, names in found if len(names) > 1]
-        if duplicate or crowded:
-            _set_issue(clip, "sticky", assignment_unclear, "Doppelte Index-Zuordnung" if duplicate else "; ".join(crowded))
+        group = groups[(_normalize(clip["identifier"]), _normalize(clip["title"]))]
+        crowded = [f"{folder}/{name}" for folder, _, names in found if len(names) > 1 for name in names]
+        if len(group) > 1:
+            _set_issue(clip, "sticky", assignment_unclear, "Doppelte Index-Zuordnung",
+                       [f"Kollektion={state['clips'][other]['collection']}, {field_names['clip_id']}={other}"
+                        for other in sorted(group, key=int)])
+        elif crowded:
+            _set_issue(clip, "sticky", assignment_unclear, "Mehrere Proxy-Dateien gefunden", crowded)
         else:
             proxy = next(((folder, names[0], source) for folder, source, names in found if names), None)
             missing = _missing_masters(ctx, collection, clip_id, clip["master_files"])
@@ -674,7 +692,9 @@ def _rebuild_process_state(state: dict) -> dict:
             elif missing == []:
                 clip["stage"] = "transcode"
             elif not clip["master_files"] or len(clip["master_files"]) != len(clip["filehashes"]):
-                _set_issue(clip, "sticky", assignment_unclear, "Dateinamen und Hashes reichen nicht für Restore")
+                _set_issue(clip, "sticky", assignment_unclear,
+                           f"Dateinamen und Hashes reichen nicht für Restore; {field_names['userpath']}={_joined(clip['master_files'])}, "
+                           f"{field_names['hash']}={_joined(clip['filehashes'])}, {field_names['backups']}={_joined(clip['lto_tapes'])}")
         _update_activity(clip, ctx)
         clip["status"] = _status(clip)
         _event(clip, "Prozesszustand nach Bereinigung neu aufgebaut", f"Vorher: {previous}")
@@ -824,22 +844,40 @@ def _write_priority_file(prio: dict[str, list[str]]) -> None:
 def _merge_hit(hit: dict) -> dict:
     rows = hit.pop("rows")
     fields = ("identifier", "title", "clip_name")
+    seen = {field: list(dict.fromkeys(value for row in rows for value in row[field])) for field in fields}
+    hit.update(identifier=" / ".join(seen["identifier"]), title=" / ".join(seen["title"]))  # Shown in error lines.
     problems = [f"{field_names[field]}: {len(row[field])} Werte" for row in rows for field in fields if len(row[field]) != 1]
     if problems:
-        hit["invalid"] = "; ".join(dict.fromkeys(problems))
+        hit["invalid"] = ("; ".join(dict.fromkeys(problems)), None)
         return hit
-    single = {field: {row[field][0] for row in rows} for field in fields}
-    conflicts = [f"{field_names[field]}: {' / '.join(sorted(values))}" for field, values in single.items() if len(values) > 1]
+    conflicts = [f"{field_names[field]}={value}" for field in fields if len(seen[field]) > 1 for value in seen[field]]
     if conflicts:
-        hit["invalid"] = "Widersprüchlich: " + "; ".join(conflicts)
+        hit["invalid"] = ("Widersprüchlich", conflicts)
+        return hit
+    tapes = {}
+    for tape in (tape for row in rows for value in row["backups"] for tape in map(str.strip, value.split(",")) if tape):
+        tapes.setdefault(tape.casefold(), tape)  # Keep the first spelling.
+    if not tapes:
+        raw = "; ".join(value for row in rows for value in row["backups"])
+        hit["invalid"] = (f"keine LTO-Tapenummer; {field_names['backups']}={raw!r}", None)
         return hit
     names = {_file_name(path).casefold(): _file_name(path) for row in rows for path in row["userpath"] if _file_name(path)}
     hashes = {value.casefold(): value for row in rows for value in row["hash"]}
     masters, hash_list = (sorted(values.values(), key=str.casefold) for values in (names, hashes))
-    hit.update({field: next(iter(single[field])) for field in fields}, hashes=hash_list, masters=masters,
-               restore_problem=None if masters and len(masters) == len(hash_list) else
-               f"{len(masters)} Dateinamen (userpath), {len(hash_list)} Hashes")
+    restore_problem = None if masters and len(masters) == len(hash_list) else (
+        f"{len(masters)} Dateinamen ({field_names['userpath']}), {len(hash_list)} Hashes; "
+        f"{field_names['userpath']}={_joined(masters)}, {field_names['hash']}={_joined(hash_list)}, "
+        f"{field_names['backups']}={_joined(tapes.values())}")
+    hit.update({field: seen[field][0] for field in fields}, hashes=hash_list, masters=masters,
+               lto_tapes=list(tapes.values()), restore_problem=restore_problem)
     return hit
+
+
+def _raw_text(row) -> str:
+    if not isinstance(row, (list, tuple)):
+        return f"Rohwert={row!r}"
+    text = ", ".join(f"{field}={value!r}" for field, value in zip(field_names.values(), row))
+    return text + (f", weitere Werte={list(row[len(field_names):])!r}" if len(row) > len(field_names) else "")
 
 
 def _search_clips(mapping: list[dict], ctx: dict) -> dict[str, list[dict]]:
@@ -866,7 +904,8 @@ def _search_clips(mapping: list[dict], ctx: dict) -> dict[str, list[dict]]:
         placeholders = 0
         for number, row in enumerate(matches, 1):
             if len(row) != len(api_fields) or not all(isinstance(value, str) for value in row):
-                _issue(ctx, "skipped", invalid_category, f"{name}#{number}", f"Kollektion={name!r}, Rückgabefelder={row!r}")
+                _issue(ctx, "skipped", invalid_category, f"{name}#{number}",
+                       f"Kollektion={name}, Trefferzeile={number}: Rückgabefelder unvollständig oder kein Text; {_raw_text(row)}")
                 continue
             values = {key: _values(raw) for key, raw in zip(keys, row)}
             if "placeholder" in (flag.casefold() for flag in values["status_flags"]):
@@ -874,23 +913,37 @@ def _search_clips(mapping: list[dict], ctx: dict) -> dict[str, list[dict]]:
                 continue  # Placeholders are ignored completely, also in the error report.
             ids = values["clip_id"]
             if len(ids) != 1 or not (ids[0].isascii() and ids[0].isdecimal()):
-                _issue(ctx, "skipped", invalid_category, f"{name}#{number}", f"Kollektion={name!r}, Clip-ID-Rohwert={row[0]!r}")
+                _issue(ctx, "skipped", invalid_category, f"{name}#{number}",
+                       f"Kollektion={name}, Trefferzeile={number}: {field_names['clip_id']} ungültig; {_raw_text(row)}")
                 continue
-            found[ids[0]].setdefault(name, {"collection": name, "invalid": None, "rows": []})["rows"].append(values)
+            found[ids[0]].setdefault(name, {"collection": name, "clip_id": ids[0], "invalid": None, "rows": []})["rows"].append(values)
         _log(f"API-Suche abgeschlossen: {name!r}: {len(matches)} Trefferzeilen, davon {placeholders} Platzhalter; "
              f"{perf_counter() - started:.1f} s.")
     return {clip_id: [_merge_hit(hit) for hit in hits.values()] for clip_id, hits in found.items()}
 
 
 # --------- FUNC: PROXY FILES ---------
-def _proxy_keys(name: str) -> list[tuple[str, str]] | None:
+def _proxy_parts(name: str) -> tuple[str, str] | None:
     prefix = cfg["proxy_prefix"] + "__"
     if not name.casefold().startswith(prefix.casefold()):
         return None
     identifier, separator, title = name[len(prefix):].partition("__")
     if not separator or not identifier.strip() or not title.strip():
         return None
+    return identifier, title
+
+
+def _proxy_keys(name: str) -> list[tuple[str, str]] | None:
+    parts = _proxy_parts(name)
+    if parts is None:
+        return None
+    identifier, title = parts
     return list(dict.fromkeys((_normalize(identifier), _normalize(value)) for value in (title, Path(title).stem)))
+
+
+def _proxy_text(name: str) -> str:
+    parts = _proxy_parts(name)
+    return f", {field_names['identifier']}={parts[0]}, {field_names['title']}={Path(parts[1]).stem}" if parts else ""
 
 
 def _proxy_index(ctx: dict, folder: str) -> dict:
@@ -975,18 +1028,24 @@ def _save_state(state: dict) -> None:
 
 
 # --------- FUNC: RECONCILE ---------
-def _classify(hits: list[dict]) -> tuple[dict | None, tuple[str, str] | None]:
+def _classify(clip_id: str, hits: list[dict]) -> tuple[dict | None, dict | None]:
+    """Return the usable hit or a problem with kind, reason and optional head/matches for format B."""
     if not hits:
-        return None, ("missing", "Nicht mehr in der Suche gefunden (Metadaten nicht abrufbar oder Kollektion geändert)")
+        return None, {"kind": "missing", "reason": "Nicht mehr in der Suche gefunden (Metadaten nicht abrufbar oder Kollektion geändert)"}
     if len(hits) > 1:
-        return None, ("multi", "Kollektionen: " + ", ".join(sorted(hit["collection"] for hit in hits)))
-    return (None, ("invalid", hits[0]["invalid"])) if hits[0]["invalid"] else (hits[0], None)
+        matches = [f"Kollektion={hit['collection']}, {field_names['identifier']}={hit['identifier']}, {field_names['title']}={hit['title']}"
+                   for hit in sorted(hits, key=lambda hit: hit["collection"].casefold())]
+        return None, {"kind": "multi", "head": f"{field_names['clip_id']}={clip_id}", "matches": matches}
+    if hits[0]["invalid"]:
+        reason, matches = hits[0]["invalid"]
+        return None, {"kind": "invalid", "reason": reason, "matches": matches}
+    return hits[0], None
 
 
 def _new_clip(clip_id: str, hit: dict) -> dict:
     return {"clip_id": clip_id, "collection": hit["collection"], "identifier": hit["identifier"],
             "title": hit["title"], "clip_name_with_extension": hit["clip_name"], "filehashes": hit["hashes"],
-            "master_files": hit["masters"], "status": "wartet", "active": True, "ready": False, "stage": "restore",
+            "master_files": hit["masters"], "lto_tapes": hit["lto_tapes"], "status": "wartet", "active": True, "ready": False, "stage": "restore",
             "queued_at": _stamp(), "preset": None, "job": None, "job_count": 0, "attempts": 0,
             "files": {"master": None, "proxy": None},
             "issues": {"file": None, "sticky": None}, "history": []}
@@ -1001,12 +1060,12 @@ def _missing_masters(ctx: dict, collection: str, clip_id: str, names: list[str])
 
 def _admit(clips: dict, clip_id: str, hit: dict, ctx: dict) -> None:
     collection, identifier, title = hit["collection"], hit["identifier"], hit["title"]
-    text = f"Clip_ID={clip_id}, Kollektion={collection}, Clipname={hit['clip_name']}"
+    text = _clip_text(hit)
     places = [(_final_folder(collection), "Zielordner"), (_qc_inbox(collection), "QC-Eingang")]
     found = [(folder, source, _lookup(ctx, folder, identifier, title)) for folder, source in places]
-    crowded = [f"{source}: {', '.join(names)}" for _, source, names in found if len(names) > 1]
+    crowded = [f"{folder}/{name}" for folder, _, names in found if len(names) > 1 for name in names]
     if crowded:
-        _issue(ctx, "skipped", "Mehrere Proxy-Dateien gefunden", clip_id, f"{text}: {'; '.join(crowded)}")
+        _issue(ctx, "skipped", "Mehrere Proxy-Dateien gefunden", clip_id, _detail(text, matches=crowded))
         return
     proxy = next(((folder, names[0], source) for folder, source, names in found if names), None)
     missing = _missing_masters(ctx, collection, clip_id, hit["masters"])
@@ -1045,27 +1104,31 @@ def _changes(clip: dict, hit: dict) -> str:
 def _reconcile(state: dict, found: dict[str, list[dict]], ctx: dict) -> None:
     """Admit new clips; for clips already in the JSON differences are only reported, the JSON stays the index."""
     clips = state["clips"]
-    classified = {clip_id: _classify(found.get(clip_id, [])) for clip_id in {*found, *clips}}
-    groups = defaultdict(list)
+    classified = {clip_id: _classify(clip_id, found.get(clip_id, [])) for clip_id in {*found, *clips}}
+    groups, sources = defaultdict(list), {}
     for clip_id, (hit, _) in classified.items():
         source = clips.get(clip_id) or hit
         if source:
+            sources[clip_id] = source
             groups[(_normalize(source["identifier"]), _normalize(source["title"]))].append(clip_id)
-    for group in (group for group in groups.values() if len(group) > 1):
-        text = "Clip_IDs: " + ", ".join(sorted(group, key=int))
+    for group in (sorted(group, key=int) for group in groups.values() if len(group) > 1):
+        first = sources[group[0]]
+        problem = {"kind": "duplicate",
+                   "head": f"{field_names['identifier']}={first['identifier']}, {field_names['title']}={first['title']}",
+                   "matches": [f"Kollektion={sources[clip_id]['collection']}, {field_names['clip_id']}={clip_id}" for clip_id in group]}
         for clip_id in (clip_id for clip_id in group if clip_id not in clips):
-            classified[clip_id] = (None, ("duplicate", text))
+            classified[clip_id] = (None, problem)
     for clip_id in sorted(classified, key=int):
         (hit, problem), clip = classified[clip_id], clips.get(clip_id)
         if clip is None and problem is None:
             _admit(clips, clip_id, hit, ctx)
-        elif clip is None:
-            collections = ", ".join(sorted(item["collection"] for item in found[clip_id]))
-            _issue(ctx, "skipped", problem_categories[problem[0]][0], clip_id,
-                   f"Clip_ID={clip_id}, Kollektion={collections}: {problem[1]}")
-        elif problem or (detail := _changes(clip, hit)):
-            category = problem_categories[problem[0]][1] if problem else metadata_changed
-            _issue(ctx, "deviation", category, clip_id, f"{_clip_text(clip)}: {problem[1] if problem else detail}")
+        elif problem:
+            section, index = ("deviation", 1) if clip else ("skipped", 0)
+            head = problem.get("head") or _clip_text(clip or found[clip_id][0])
+            _issue(ctx, section, problem_categories[problem["kind"]][index], clip_id,
+                   _detail(head, problem.get("reason", ""), problem.get("matches")))
+        elif changes := _changes(clip, hit):
+            _issue(ctx, "deviation", metadata_changed, clip_id, _detail(_clip_text(clip), changes))
 
 
 # --------- FUNC: WORKERS ---------
@@ -1215,6 +1278,11 @@ def _apply_report(clip: dict, job: dict, report: dict, worker: str | None, ctx: 
     stage, label = job["stage"], stage_labels[job["stage"]]
     status, result = report["status"], str(report.get("result") or "").strip()
     by = f"Worker {worker or 'unbekannt'}"
+
+    def job_text(result: str) -> str:
+        return (f"stage={label}, job_id={job['id']}, worker={worker or 'unbekannt'}, "
+                f"attempts={clip['attempts']}, result={result}")
+
     clip["job"] = None
     if status == "rejected" and stage != "qc":
         status = "failed"
@@ -1223,7 +1291,7 @@ def _apply_report(clip: dict, job: dict, report: dict, worker: str | None, ctx: 
         try:
             problem = _take_outputs(clip, job, report, ctx)
         except DeliveryBlocked as exc:
-            _set_issue(clip, "sticky", delivery_blocked, str(exc))
+            _set_issue(clip, "sticky", delivery_blocked, job_text(str(exc)))
             _event(clip, delivery_blocked, str(exc))
             _finish_output(job, True, ctx)
             return
@@ -1233,7 +1301,7 @@ def _apply_report(clip: dict, job: dict, report: dict, worker: str | None, ctx: 
             return
         status, result = "failed", problem
     if status == "rejected":
-        _set_issue(clip, "sticky", qc_rejected, result)
+        _set_issue(clip, "sticky", qc_rejected, job_text(result))
         _event(clip, qc_rejected, f"{by}: {result}")
         _finish_output(job, True, ctx)
         return
@@ -1241,9 +1309,9 @@ def _apply_report(clip: dict, job: dict, report: dict, worker: str | None, ctx: 
     _event(clip, f"{label}-Job fehlgeschlagen", f"{by}: {result}")
     _finish_output(job, False, ctx)
     if clip["attempts"] >= cfg["max_job_attempts"]:
-        _set_issue(clip, "sticky", job_failed, f"{label}, {clip['attempts']} Versuche: {result}")
+        _set_issue(clip, "sticky", job_failed, job_text(result))
     else:
-        _issue(ctx, "note", "Job fehlgeschlagen – neuer Versuch", clip["clip_id"], f"{_clip_text(clip)}: {label}: {result}")
+        _issue(ctx, "note", "Job fehlgeschlagen – neuer Versuch", clip["clip_id"], _detail(_clip_text(clip), job_text(result)))
 
 
 def _retire(folder: str, job_id: str, ctx: dict) -> None:
@@ -1367,7 +1435,8 @@ def _update_activity(clip: dict, ctx: dict) -> None:
     last_text = f"; letztes Ereignis: {last['at']} {last['event']} ({last['position']})" if last else ""
     for reason in reasons:
         _issue(ctx, "inactive", reason["category"], clip["clip_id"],
-               f"{_clip_text(clip)}; letzter Stand: {_position(clip)}; {reason['detail']}; seit {reason['since']}{last_text}")
+               _detail(f"{_clip_text(clip)}; letzter Stand: {_position(clip)}; {reason['detail']}; seit {reason['since']}{last_text}",
+                       matches=reason["matches"]))
 
 
 def _status(clip: dict) -> str:
@@ -1401,10 +1470,9 @@ def _final_audit(state: dict, mapping: list[dict], ctx: dict) -> None:
             relative = f"{final}/{name}"
             if len(candidates) != 1:
                 counts[final]["unknown"] += 1
-                reason = "Kein JSON-Eintrag zuordenbar" if not candidates else "Mehrere JSON-Einträge zuordenbar"
-                ids = ", ".join(sorted(candidates, key=int))
+                matches = [_clip_text(candidates[clip_id]) for clip_id in sorted(candidates, key=int)]
                 _issue(ctx, "final", "Unbekannte finale Clip-Datei", relative,
-                       f"Fundort={relative}; {reason}" + (f"; Clip_IDs={ids}" if ids else ""))
+                       _detail(f"Fundort={relative}{_proxy_text(name)}", "Kein JSON-Eintrag zuordenbar", matches))
                 continue
             clip_id, clip = next(iter(candidates.items()))
             matched[clip_id].append((final, name, size, clip))
@@ -1421,14 +1489,14 @@ def _final_audit(state: dict, mapping: list[dict], ctx: dict) -> None:
             if not proxy or expected.casefold() != actual.casefold():
                 reasons.append(f"JSON-Fundort abweichend; erwartet={expected}")
             if len(files) > 1:
-                reasons.append("Mehrere finale Dateien für diesen Clip: " + ", ".join(f"{f}/{n}" for f, n, _, _ in files))
+                reasons.append("Mehrere finale Dateien für diesen Clip")
             if not size:
                 reasons.append("Datei ist leer")
             if reasons:
                 counts[final]["unexpected"] += 1
                 _issue(ctx, "final", "Unerwartete finale Clip-Datei", actual,
-                       f"Fundort={actual}; {_clip_text(clip)}; Identifier={clip['identifier']}; Titel={clip['title']}; "
-                       + "; ".join(reasons))
+                       _detail(f"Fundort={actual}; {_clip_text(clip)}; " + "; ".join(reasons),
+                               matches=[f"{f}/{n}" for f, n, _, _ in files] if len(files) > 1 else None))
     ctx["final_counts"] = counts
 
 
@@ -1461,7 +1529,7 @@ def _leftovers(state: dict, mapping: list[dict], ctx: dict) -> None:
         folder = _qc_inbox(entry["name"])
         for key, (name, _) in sorted(_listing(ctx, folder).items()):
             if (folder, key) not in proxies and not _ignored(name):
-                _issue(ctx, "note", "Datei ohne passenden Clip (QC-Eingang)", f"{folder}/{key}", f"{folder}/{name}")
+                _issue(ctx, "note", "Datei ohne passenden Clip (QC-Eingang)", f"{folder}/{key}", f"{folder}/{name}{_proxy_text(name)}")
 
 
 def _job_payload(clip: dict, job_id: str, folder: str) -> dict:
@@ -1635,7 +1703,11 @@ def _format_errors(issues: list[dict], when: datetime, title: str = "Fehlerberic
                 grouped[item["category"]].append(item["detail"])
         for category in sorted(grouped, key=str.casefold):
             details = sorted(dict.fromkeys(grouped[category]), key=str.casefold)
-            lines += ["", f"=== {heading.split(' (')[0]} – {category} ({len(details)}) ===", *details]
+            lines += ["", f"=== {heading.split(' (')[0]} – {category} ({len(details)}) ==="]
+            for index, detail in enumerate(details):
+                if index and "\n" in detail + details[index - 1]:
+                    lines.append("")  # Blank line around multi-line blocks (format B).
+                lines.append(detail)
     return "\n".join(lines) + "\n"
 
 
