@@ -54,7 +54,6 @@ issue_sections = {
 index_sections = ("skipped", "deviation")
 problem_categories = {  # kind: (category for new clips, category for clips already in the JSON)
     "missing": (None, "Nicht mehr in der Suche"),
-    "placeholder": ("Platzhalter", "In der Suche jetzt Platzhalter"),
     "multi": ("Clip-ID in mehreren Kollektionen", "Clip-ID jetzt in mehreren Kollektionen"),
     "invalid": ("Unvollständige oder widersprüchliche Metadaten",
                 "Metadaten in der Suche jetzt unvollständig oder widersprüchlich"),
@@ -824,8 +823,6 @@ def _write_priority_file(prio: dict[str, list[str]]) -> None:
 # --------- FUNC: SEARCH ---------
 def _merge_hit(hit: dict) -> dict:
     rows = hit.pop("rows")
-    if hit["placeholder"]:
-        return hit
     fields = ("identifier", "title", "clip_name")
     problems = [f"{field_names[field]}: {len(row[field])} Werte" for row in rows for field in fields if len(row[field]) != 1]
     if problems:
@@ -872,16 +869,14 @@ def _search_clips(mapping: list[dict], ctx: dict) -> dict[str, list[dict]]:
                 _issue(ctx, "skipped", invalid_category, f"{name}#{number}", f"Kollektion={name!r}, Rückgabefelder={row!r}")
                 continue
             values = {key: _values(raw) for key, raw in zip(keys, row)}
+            if "placeholder" in (flag.casefold() for flag in values["status_flags"]):
+                placeholders += 1
+                continue  # Placeholders are ignored completely, also in the error report.
             ids = values["clip_id"]
             if len(ids) != 1 or not (ids[0].isascii() and ids[0].isdecimal()):
                 _issue(ctx, "skipped", invalid_category, f"{name}#{number}", f"Kollektion={name!r}, Clip-ID-Rohwert={row[0]!r}")
                 continue
-            hit = found[ids[0]].setdefault(name, {"collection": name, "placeholder": False, "invalid": None, "rows": []})
-            if "placeholder" in (flag.casefold() for flag in values["status_flags"]):
-                hit["placeholder"] = True
-                placeholders += 1
-                continue
-            hit["rows"].append(values)
+            found[ids[0]].setdefault(name, {"collection": name, "invalid": None, "rows": []})["rows"].append(values)
         _log(f"API-Suche abgeschlossen: {name!r}: {len(matches)} Trefferzeilen, davon {placeholders} Platzhalter; "
              f"{perf_counter() - started:.1f} s.")
     return {clip_id: [_merge_hit(hit) for hit in hits.values()] for clip_id, hits in found.items()}
@@ -983,8 +978,6 @@ def _save_state(state: dict) -> None:
 def _classify(hits: list[dict]) -> tuple[dict | None, tuple[str, str] | None]:
     if not hits:
         return None, ("missing", "Nicht mehr in der Suche gefunden (Metadaten nicht abrufbar oder Kollektion geändert)")
-    if any(hit["placeholder"] for hit in hits):
-        return None, ("placeholder", "Suche meldet Platzhalter")
     if len(hits) > 1:
         return None, ("multi", "Kollektionen: " + ", ".join(sorted(hit["collection"] for hit in hits)))
     return (None, ("invalid", hits[0]["invalid"])) if hits[0]["invalid"] else (hits[0], None)
