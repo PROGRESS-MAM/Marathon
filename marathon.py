@@ -36,7 +36,8 @@ field_names = {
 stages = ("restore", "transcode", "qc")  # Also the stage folder names.
 stage_labels = {"restore": "Restore", "transcode": "Transcode", "qc": "QC"}
 limit_keys = {stage: stage_labels[stage].casefold() for stage in stages}
-job_boxes = ("offen", "laufend", "fertig", "archiv", "zurueckgezogen", "ausgang")
+pool_boxes = ("offen", "laufend", "fertig", "archiv")
+collection_boxes = ("ausgang", "archiv")
 inbox, outbox, worker_dir = "eingang", "ausgang", "worker"
 report_statuses = ("ok", "failed", "rejected")
 system_files = frozenset({"thumbs.db", "desktop.ini", ".ds_store"})
@@ -102,7 +103,7 @@ tracked_fields = {"collection": "Kollektion", "identifier": field_names["identif
 
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "1.4.3"
+app_version = "1.5.0"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 log_dir = project_dir / "log"
@@ -129,6 +130,7 @@ ensured_folders: set[str] = set()
 lock_handle = None
 progress_lock = threading.Lock()
 progress_width = 0
+last_stamp = datetime.min.replace(tzinfo=timezone.utc)
 
 
 # --------- FUNC: CONSOLE AND LOG ---------
@@ -184,7 +186,7 @@ def _read_config() -> dict:
     with config_path.open(encoding="utf-8-sig") as handle:
         parser.read_file(handle)
     problems = [f"[{section}] {key} ist unbekannt" for section in parser.sections() for key in parser[section]
-                if key not in config_schema.get(section, {}) and (section, key) != ("timing", "stable_minutes")]
+                if key not in config_schema.get(section, {})]
     values = {}
     for section, keys in config_schema.items():
         for key, kind in keys.items():
@@ -268,6 +270,10 @@ def _work_folder(collection: str) -> str:
 
 def _stage_folder(collection: str, stage: str) -> str:
     return f"{_work_folder(collection)}/{stage}"
+
+
+def _job_folder(stage: str) -> str:
+    return f"{cfg['work_dir']}/{stage}"
 
 
 def _master_root(collection: str) -> str:
@@ -355,7 +361,10 @@ def _duration(delta: timedelta) -> str:
 
 
 def _stamp() -> str:
-    return datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%f")
+    global last_stamp
+    # datetime.now() repeats for about 15 ms on Windows before Python 3.13; job ids must still sort in creation order.
+    last_stamp = max(datetime.now(timezone.utc), last_stamp + timedelta(microseconds=1))
+    return last_stamp.strftime("%Y%m%dT%H%M%S%f")
 
 
 def _normalize(value: str) -> str:
@@ -532,6 +541,34 @@ def _rmdir(relative: str) -> None:
         _safe_work_path(relative).rmdir()
     except (OSError, ValueError):
         pass  # Not empty, outside work folders or already gone.
+
+
+def _delete_job_file(relative: str) -> bool:
+    path = _safe_work_path(relative)
+    try:
+        path.unlink()
+    except OSError:
+        return False
+    return True
+
+
+def _job_output(relative: str, job_id: str) -> str | None:
+    try:
+        data = json.loads(_safe_work_path(relative).read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValueError):
+        return None
+    output = data.get("output_folder") if isinstance(data, dict) else None
+    if not isinstance(output, str) or output.split("/")[-2:] != [outbox, job_id]:
+        return None
+    try:
+        _safe_work_path(output)
+    except ValueError:
+        return None
+    return output
+
+
+def _output_archive(output_folder: str) -> str:
+    return f"{output_folder.rsplit('/', 2)[0]}/archiv"
 
 
 class DeliveryBlocked(Exception):
@@ -728,7 +765,7 @@ def _rebuild_process_state(state: dict) -> dict:
         _update_activity(clip, ctx)
         clip["status"] = _status(clip)
         _event(clip, "Prozesszustand nach Bereinigung neu aufgebaut", f"Vorher: {previous}")
-    state.update(workers={}, files_seen={}, updated_at=_now())
+    state.update(workers={}, updated_at=_now())
     _keep_notes(state, [dict(item, section="note") for item in ctx["issues"]])
     return state
 
@@ -788,10 +825,11 @@ def _begin_delete() -> dict | None:
 def _ensure_folders(mapping: list[dict], force: bool = False) -> int:
     """Create missing work and stage folders; returns how many were created."""
     folders = {cfg["work_dir"], f"{cfg['work_dir']}/{worker_dir}"}
-    for entry in mapping:
-        for stage in stages:
+    for stage in stages:
+        folders |= {f"{_job_folder(stage)}/{box}" for box in pool_boxes}
+        for entry in mapping:
             base = _stage_folder(entry["name"], stage)
-            folders |= {f"{base}/{box}" for box in (*job_boxes, *((inbox,) if stage != "restore" else ()))}
+            folders |= {f"{base}/{box}" for box in (*collection_boxes, *((inbox,) if stage != "restore" else ()))}
     parts = [relative.split("/") for relative in folders]
     folders |= {"/".join(items[:end]) for items in parts for end in range(1, len(items))}
     created = 0
@@ -854,20 +892,6 @@ def _priority(mapping: list[dict], state: dict, ctx: dict) -> dict[str, list[str
         _issue(ctx, "note", "Prioliste ungültig – letzte gültige Reihenfolge gilt", "priority", str(exc))
     order = [entry["name"] for entry in mapping]
     return {stage: [*explicit[stage], *(name for name in order if name not in explicit[stage])] for stage in stages}
-
-
-def _write_priority_file(prio: dict[str, list[str]]) -> None:
-    data = {"schema_version": 1, "stages": {
-        stage_labels[stage]: [{"collection": name, **{box: f"{_stage_folder(name, stage)}/{box}"
-                                                      for box in ("offen", "laufend", "fertig")}}
-                              for name in prio[stage]] for stage in stages}}
-    path, text = _path(f"{cfg['work_dir']}/priority.json"), json.dumps(data, ensure_ascii=False, indent=2) + "\n"
-    try:
-        if path.read_text(encoding="utf-8") == text:
-            return
-    except (FileNotFoundError, UnicodeError):
-        pass
-    _write_text_atomic(path, text)
 
 
 # --------- FUNC: SEARCH ---------
@@ -1176,7 +1200,7 @@ def _lookup(ctx: dict, folder: str, identifier: str, title: str) -> list[str]:
 # --------- FUNC: STATE ---------
 def _empty_state() -> dict:
     return {"schema_version": 5, "priority": None, "notes": [], "index": {"updated_at": None, "counts": {}, "error_list": None},
-            "workers": {}, "files_seen": {}, "clips": {}}
+            "workers": {}, "clips": {}}
 
 
 def _clip_problem(clip_id: str, clip) -> str | None:
@@ -1200,23 +1224,8 @@ def _load_state() -> dict:
         return _empty_state()
     with state_path.open(encoding="utf-8") as handle:
         state = json.load(handle)
-    version = state.get("schema_version") if isinstance(state, dict) else None
-    if version in (1, 2):
-        raise ValueError(f"Zustand hat ein altes Format (Version {version}). Bitte state/marathon.json löschen; "
-                         "'run' oder 'update-index' baut den Index neu auf.")
-    if version not in (3, 4, 5) or not isinstance(state.get("clips"), dict):
+    if not isinstance(state, dict) or state.get("schema_version") != 5 or not isinstance(state.get("clips"), dict):
         raise ValueError("Unbekanntes Zustandsformat; keine Aktualisierung.")
-    for key, default in _empty_state().items():
-        state.setdefault(key, default)
-    if version == 3:  # Version 3 tracked search problems per clip; now the JSON itself is the index.
-        state["schema_version"] = 4
-        for clip in state["clips"].values():
-            for key, item in (("issues", "search"), ("job", "outdated")):
-                if isinstance(clip, dict) and isinstance(clip.get(key), dict):
-                    clip[key].pop(item, None)
-    if version in (3, 4):  # Up to version 4 the JSON also kept the issues of the last update-index.
-        index = state["index"] if isinstance(state["index"], dict) else {}
-        state.update(schema_version=5, index={"updated_at": index.get("updated_at"), "counts": {}, "error_list": None})
     for clip_id, clip in state["clips"].items():
         problem = _clip_problem(clip_id, clip)
         if problem:
@@ -1348,19 +1357,17 @@ def _reconcile(state: dict, found: dict[str, list[dict]], ctx: dict, dropped: di
 
 
 # --------- FUNC: WORKERS ---------
-# Worker rules (provisional until the tools exist; paths are relative to the share root with "/" as separator):
-# - Heartbeat at least once a minute: <root>/<work_dir>/worker/<worker>.json, written via temporary name + rename:
-#   {"worker": str, "stage": "Restore" | "Transcode" | "QC", "host": str, "job_id": str | null, "beat": <changes each time>}
-# - Read <root>/<work_dir>/priority.json and walk the collections of the own stage in the given order.
-# - Take the first *.json in "offen" (sorted by name) by renaming it into "laufend/<worker>/";
-#   if the rename fails because the file is gone, another worker was faster: try the next file.
-# - Read inputs only where the job says; write results only into the job's output_folder (ausgang/<job_id>).
-#   Restore: all names from "files" (restored via "hashes"); Transcode: exactly one proxy named by the proxy scheme,
-#   otherwise the job fails; QC: never move the proxy. Protocol files (.log/.txt/.json) are archived.
-# - Leave the job file in "laufend"; write the report as "fertig/<job_id>.json" via a temporary name that does not
-#   end in ".json", then rename: {"job_id": str, "status": "ok" | "failed" | "rejected" (QC only),
-#   "result": str (required unless ok), "preset": str (Transcode)}.
-# - Marathon moves results to the next stage, archives job, report and leftovers, and deletes failed partial results.
+# Worker rules (paths relative to the share root, "/" as separator):
+# - Heartbeat at least once a minute: <work_dir>/worker/<worker>.json, temp name + rename:
+#   {"worker": str, "stage": "Restore"|"Transcode"|"QC", "host": str, "job_id": str|null, "beat": <changes>}
+# - Take the first *.json in <work_dir>/<stage>/offen (sorted by name) by renaming it into laufend/<worker>/;
+#   FileNotFoundError or PermissionError: another worker was faster or the job was withdrawn, try the next one.
+# - Read inputs only where the job says; write results only into the job's output_folder.
+#   Restore: all names from "files"; Transcode: exactly one proxy named by the proxy scheme; QC: never move the proxy.
+# - Leave the job file in laufend; write the report as <report_folder>/<job_id>.json via a temp name not ending
+#   in ".json": {"job_id": str, "status": "ok"|"failed"|"rejected" (QC only), "result": str (required unless ok),
+#   "preset": str|null}.
+# - Marathon moves results on, archives job, report and output leftovers, deletes failed partial results and withdrawn jobs.
 def _read_workers(state: dict) -> None:
     folder, current = f"{cfg['work_dir']}/{worker_dir}", {}
     for key, (name, _) in sorted(_scan(folder).items()):
@@ -1441,7 +1448,7 @@ def _finish_output(job: dict, keep: bool, ctx: dict) -> None:
         return
     if keep and any(path.iterdir()):
         try:
-            _move(job["output_folder"], f"{job['folder']}/archiv", f"{job['id']}.{outbox}")
+            _move(job["output_folder"], _output_archive(job["output_folder"]), f"{job['id']}.{outbox}")
         except OSError as exc:
             _issue(ctx, "note", "Ausgang nicht archivierbar (bleibt liegen)", job["output_folder"], f"{job['output_folder']}: {exc}")
         return
@@ -1533,10 +1540,13 @@ def _apply_report(clip: dict, job: dict, report: dict, worker: str | None, ctx: 
 def _retire(folder: str, job_id: str, ctx: dict) -> None:
     """Archive job file and output folder of a job Marathon no longer tracks, if they exist."""
     found = _running(ctx, folder).get(f"{job_id}.json".casefold())
-    if found:
-        _move(f"{folder}/laufend/{found[0]}/{found[1]}", f"{folder}/archiv")
-    if job_id in _dirs(ctx, f"{folder}/{outbox}"):
-        _move(f"{folder}/{outbox}/{job_id}", f"{folder}/archiv", f"{job_id}.{outbox}")
+    if not found:
+        return
+    relative = f"{folder}/laufend/{found[0]}/{found[1]}"
+    output = _job_output(relative, Path(found[1]).stem)
+    _move(relative, f"{folder}/archiv")
+    if output and _path(output).is_dir():
+        _move(output, _output_archive(output), f"{Path(found[1]).stem}.{outbox}")
 
 
 def _collect_reports(folder: str, jobs: dict[str, dict], ctx: dict) -> None:
@@ -1594,9 +1604,14 @@ def _locate_job(clip: dict, ctx: dict) -> None:
 
 def _sweep_unknown_jobs(folder: str, known: set[str], ctx: dict) -> None:
     for key, (name, _) in _listing(ctx, f"{folder}/offen").items():
-        if key.endswith(".json") and key not in known and _move(f"{folder}/offen/{name}", f"{folder}/zurueckgezogen"):
-            _rmdir(f"{folder}/{outbox}/{Path(name).stem}")
-            _issue(ctx, "note", "Unbekannte Job-Datei zurückgezogen", f"{folder}/{key}", f"{folder}/offen/{name}")
+        if not key.endswith(".json") or key in known:
+            continue
+        relative = f"{folder}/offen/{name}"
+        output = _job_output(relative, Path(name).stem)
+        if _delete_job_file(relative):
+            if output:
+                _rmdir(output)
+            _issue(ctx, "note", "Unbekannte Job-Datei gelöscht", f"{folder}/{key}", relative)
     for key, (worker, name) in _running(ctx, folder).items():
         if key.endswith(".json") and key not in known:
             _issue(ctx, "note", "Unbekannter laufender Job (Ergebnis wird ignoriert)", f"{folder}/{key}",
@@ -1604,14 +1619,14 @@ def _sweep_unknown_jobs(folder: str, known: set[str], ctx: dict) -> None:
 
 
 def _withdraw(clip: dict) -> bool:
-    """Withdraw a job that no worker has taken; False if the job is (or just became) running."""
+    """Delete a job that no worker has taken; False if it is running, was just taken or cannot be deleted yet."""
     job = clip["job"]
     if job is None:
         return True
     if job["state"] == "laufend":
         return False
-    if job["state"] == "offen" and not _move(f"{job['folder']}/offen/{job['file']}", f"{job['folder']}/zurueckgezogen"):
-        return False  # A worker took it meanwhile.
+    if job["state"] == "offen" and not _delete_job_file(f"{job['folder']}/offen/{job['file']}"):
+        return False
     _rmdir(job["output_folder"])
     clip["job"] = None
     _event(clip, "Job zurückgezogen", job["file"])
@@ -1750,15 +1765,16 @@ def _leftovers(state: dict, mapping: list[dict], ctx: dict) -> None:
 
 def _job_payload(clip: dict, job_id: str, folder: str) -> dict:
     stage = clip["stage"]
-    payload = {"schema_version": 2, "job_id": job_id, "stage": stage_labels[stage], "clip_id": clip["clip_id"],
+    payload = {"schema_version": 3, "job_id": job_id, "stage": stage_labels[stage], "clip_id": clip["clip_id"],
                "collection": clip["collection"], "identifier": clip["identifier"], "title": clip["title"],
                "clip_name": clip["clip_name_with_extension"], "created_at": _now(),
-               "report_folder": f"{folder}/fertig", "output_folder": f"{folder}/{outbox}/{job_id}"}
+               "report_folder": f"{folder}/fertig",
+               "output_folder": f"{_stage_folder(clip['collection'], stage)}/{outbox}/{job_id}"}
     if stage == "restore":
         payload.update(hashes=clip["filehashes"], files=clip["master_files"])
     elif stage == "transcode":
         master = clip["files"]["master"]
-        payload.update(inputs=[f"{master['folder']}/{name}" for name in master["names"]], preset=None)
+        payload.update(inputs=[f"{master['folder']}/{name}" for name in master["names"]])
     else:
         payload["input"] = f"{clip['files']['proxy']['folder']}/{clip['files']['proxy']['name']}"
     return payload
@@ -1766,9 +1782,9 @@ def _job_payload(clip: dict, job_id: str, folder: str) -> dict:
 
 def _create_job(clip: dict) -> None:
     stage = clip["stage"]
-    folder = _stage_folder(clip["collection"], stage)
+    folder = _job_folder(stage)
     clip["job_count"] += 1
-    job_id = f"{clip['queued_at']}__{clip['clip_id']}__{stage_labels[stage].casefold()}{clip['job_count']}"
+    job_id = f"{_stamp()}__{clip['clip_id']}__{stage_labels[stage].casefold()}{clip['job_count']}"
     payload = _job_payload(clip, job_id, folder)
     _path(payload["output_folder"]).mkdir(parents=True, exist_ok=True)
     _write_text_atomic(_path(f"{folder}/offen/{job_id}.json"), json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
@@ -1782,21 +1798,17 @@ def _schedule(state: dict, prio: dict[str, list[str]], ctx: dict) -> None:
     clips = state["clips"].values()
     for clip in clips:
         job = clip["job"]
-        expected = None if clip["ready"] else _stage_folder(clip["collection"], clip["stage"])
-        if job and (not clip["active"] or job["folder"] != expected or job["stage"] != clip["stage"]):
+        if job and (not clip["active"] or job["stage"] != clip["stage"]):
             _withdraw(clip)
     for stage in stages:
         ranks = {name: rank for rank, name in enumerate(prio[stage])}
-        pool = sorted((clip for clip in clips if clip["active"] and not clip["ready"] and clip["stage"] == stage and
-                       (not clip["job"] or clip["job"]["state"] == "offen")),
-                      key=lambda clip: (ranks.get(clip["collection"], len(ranks)), clip["queued_at"]))
-        limit = cfg[limit_keys[stage]]
-        for clip in pool[limit:]:
-            if clip["job"]:
-                _withdraw(clip)
-        for clip in pool[:limit]:
-            if clip["job"] is None:
-                _create_job(clip)
+        waiting = sorted((clip for clip in clips if clip["active"] and not clip["ready"] and clip["stage"] == stage and
+                          clip["job"] is None),
+                         key=lambda clip: (ranks.get(clip["collection"], len(ranks)), clip["queued_at"]))
+        pending = sum(1 for clip in clips if clip["job"] and clip["job"]["stage"] == stage and clip["job"]["state"] == "offen")
+        free = max(0, cfg[limit_keys[stage]] - pending)
+        for clip in waiting[:free]:
+            _create_job(clip)
 
 
 def _process(state: dict, mapping: list[dict], prio: dict[str, list[str]], ctx: dict, writing: bool) -> None:
@@ -1805,10 +1817,8 @@ def _process(state: dict, mapping: list[dict], prio: dict[str, list[str]], ctx: 
     _read_workers(state)
     if writing:
         _ensure_folders(mapping)
-        _write_priority_file(prio)
         jobs = {clip["job"]["id"]: clip for clip in clips.values() if clip["job"]}
-        folders = sorted({_stage_folder(entry["name"], stage) for entry in mapping for stage in stages} |
-                         {clip["job"]["folder"] for clip in jobs.values()})
+        folders = [_job_folder(stage) for stage in stages]
         for folder in folders:
             _collect_reports(folder, jobs, ctx)
         ctx["listings"].clear()  # Reports moved files around.
@@ -1826,7 +1836,6 @@ def _process(state: dict, mapping: list[dict], prio: dict[str, list[str]], ctx: 
         _schedule(state, prio, ctx)
     for clip in clips.values():
         clip["status"] = _status(clip)
-    state["files_seen"] = {}  # Compatibility with states from earlier versions.
 
 
 # --------- FUNC: REPORT ---------
