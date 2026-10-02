@@ -23,6 +23,10 @@ api_identifier, api_title = "001 Identifier", "014 Title Original"
 lookup_fields = ("clip_id", api_identifier, api_title, "006 Source PROGRESS", "007 Collection PROGRESS", "101a Genre German",
                  "status_flags")
 lookup_chunk = 50  # Identifiers per API search
+# Marathon index error list: heading of the skipped section, separator of multi-line blocks, Clip_ID in details
+skipped_header_pattern = re.compile(r"=== Gefunden, aber nicht aufgenommen – (.+) \(\d+\) ===")
+match_separator = "———"
+clip_id_pattern = re.compile(r"\bclip_id=(\d+)")
 # Clip Flattener naming rules: DEFA + digits [+ _suffix]; "Titel, Teil 1/2"; name segment T1/P1/Hermlin -> ID suffix _1
 defa_id_pattern = re.compile(r"(?i)defa[\s_.-]*(\d+)(?:_([a-z]|\d+))?")
 combined_parts_pattern = re.compile(r"(?i)^(.+?),\s*teil\s+(\d+)\.?\s*/\s*(\d+)\.?\s*$")
@@ -50,7 +54,7 @@ error_labels = {  # Order of the categories in the error list
 
 # --------- CONFIG ---------
 app_name = "AQC-Sort"
-app_version = "0.7.1"
+app_version = "0.8.0"
 project_dir = Path(__file__).resolve().parent
 config_path = project_dir / "res" / "config.ini"  # Marathon's config
 state_dir = project_dir / "state"
@@ -58,6 +62,7 @@ state_path = state_dir / "marathon.json"
 lock_path = state_dir / "marathon.lock"  # Same lock as Marathon: never run both at once.
 backup_dir = state_dir / "backup"
 output_dir = project_dir / "reports" / "aqc"
+index_error_dir = project_dir / "reports" / "errors"  # Marathon's index error lists
 main_log = project_dir / "log" / "aqc_sort.log"
 aqc_dir = "AQC"  # Below defa_dir
 
@@ -121,8 +126,8 @@ def _load_state() -> dict:
         raise FileNotFoundError(f"Kein Marathon-Zustand: {state_path}. Erst 'update-index' in Marathon.")
     with state_path.open(encoding="utf-8") as handle:
         state = json.load(handle)
-    if not isinstance(state, dict) or state.get("schema_version") != 4 or not isinstance(state.get("clips"), dict):
-        raise ValueError("Unbekanntes Zustandsformat (erwartet: Marathon-JSON Version 4). Nichts geändert.")
+    if not isinstance(state, dict) or state.get("schema_version") != 5 or not isinstance(state.get("clips"), dict):
+        raise ValueError("Unbekanntes Zustandsformat (erwartet: Marathon-JSON Version 5). Nichts geändert.")
     return state
 
 
@@ -296,7 +301,7 @@ def _plan_moves(cfg: dict, clips: dict, found: list[tuple]) -> tuple[list[dict],
 def _take_over(clip: dict, move: dict, cfg: dict) -> None:
     folder = move["target"].relative_to(cfg["root_path"]).as_posix()
     clip["files"]["proxy"] = {"folder": folder, "name": move["source"].name, "source": "AQC", "last_seen_at": _now()}
-    clip.update(stage="qc", queued_at=_stamp(), status="wartet")
+    clip.update(stage="qc", queued_at=_stamp(), status="wartet", attempts=0)
     clip["history"].append({"at": _now(), "event": "Aus AQC übernommen – wartet auf QC", "position": "Queue QC",
                             "detail": f"{cfg['defa_dir']}/{aqc_dir}/{move['source'].name}"})
 
@@ -380,11 +385,37 @@ def _collections(row: dict, mapping: list[dict]) -> list[str]:
 
 
 def _skipped(state: dict) -> dict[str, list[str]]:
-    """Marathon categories per Clip_ID of 'Gefunden, aber nicht aufgenommen' from the last update-index."""
+    """Marathon categories per Clip_ID of 'Gefunden, aber nicht aufgenommen' from the index error list of the last
+    update-index; Clip_IDs in the JSON are left out (blocks of duplicates also list the clips already admitted)."""
+    name = (state.get("index") or {}).get("error_list")
+    if not name:
+        return {}
+    path = index_error_dir / name
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        _log(f"Index-Fehlerliste nicht lesbar: {path} ({exc}); Grund 'nicht aufgenommen' fehlt in der Fehlerliste.")
+        return {}
+    units, category, multi = [], None, False  # units: (category, [head, *match lines])
+    for line in lines:
+        if line.startswith("=== "):
+            match = skipped_header_pattern.fullmatch(line)
+            category, multi = (match.group(1) if match else None), False
+        elif category is None or not line.strip():
+            multi = False
+        elif line == match_separator and units and units[-1][0] == category:
+            multi = True
+        elif multi:
+            units[-1][1].append(line)
+        else:
+            units.append((category, [line]))
     skipped = defaultdict(dict)
-    for item in (state.get("index") or {}).get("issues") or []:
-        if isinstance(item, dict) and item.get("section") == "skipped":
-            skipped[str(item.get("key"))][str(item.get("category"))] = None
+    for category, (head, *matches) in units:
+        # Clip_ID from the head; only duplicate blocks name their clips in the match lines.
+        ids = clip_id_pattern.findall(head) or [found for line in matches for found in clip_id_pattern.findall(line)]
+        for clip_id in ids:
+            if clip_id not in state["clips"]:
+                skipped[clip_id][category] = None
     return {key: list(categories) for key, categories in skipped.items()}
 
 
