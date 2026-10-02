@@ -92,14 +92,16 @@ command_aliases = {"exit": "quit", "manual-report": "report", "manueller-report"
 missing_job_grace = timedelta(minutes=30)  # Before a vanished job file is recreated.
 editshare_filter_fields = frozenset({"006 Source PROGRESS", "007 Collection PROGRESS", "101a Genre German"})
 token_keys = ("vt_api_token", "api_key", "apiKey", "token", "access_token")
-veritone_sort_id, veritone_page_size, veritone_timeout = 913, 200, 120  # Search and byIds take at most 200 per call.
+veritone_page_size, veritone_timeout = 200, 120  # Search and byIds take at most 200 per call.
+veritone_placeholder = ("Production.Codec", "placeholder")  # Field and casefolded value of placeholder assets.
+veritone_passes = 3  # Paging is not always stable; missing assets are searched again in further passes.
 tracked_fields = {"collection": "Kollektion", "identifier": field_names["identifier"], "title": field_names["title"],
                   "clip_name_with_extension": field_names["clip_name"], "master_files": field_names["userpath"],
                   "filehashes": field_names["hash"]}
 
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "1.4.0"
+app_version = "1.4.2"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 log_dir = project_dir / "log"
@@ -1005,54 +1007,72 @@ def _item_values(item, name: str) -> list[str]:
     return found + [text for key, value in item.items() for text in (_scalars(value) if key == name else _item_values(value, name))]
 
 
-def _veritone_assets(entry: dict, token: str) -> list[str]:
-    """Asset IDs of one collection from all search pages; raises unless exactly totalCount assets were read."""
-    name, ids = entry["name"], {}
-    params = {"q": "", "sortId": veritone_sort_id, "filterIds": ",".join(entry["veritone_filter_ids"]),
-              "n": veritone_page_size, "i": 0}
+def _veritone_pages(entry: dict, token: str, ids: dict) -> tuple[int, int, int]:
+    """Read all search pages once into ids; returns totalCount, hits read and distinct assets of this pass."""
+    name, read, seen = entry["name"], 0, set()
+    params = {"q": "", "filterIds": ",".join(entry["veritone_filter_ids"]), "n": veritone_page_size, "i": 0}
     while True:
         page = _veritone_get("/v1/search", token, params)
         if not isinstance(page, dict) or not isinstance(page.get("items"), list) or type(page.get("totalCount")) is not int:
             raise RuntimeError(f"Unerwartete Veritone-Antwort auf die Suche für {name!r}; Zustand unverändert.")
-        before = len(ids)
         for item in page["items"]:
             asset_id = item.get("assetId") if isinstance(item, dict) else None
             if asset_id is None:
                 raise RuntimeError(f"Veritone-Treffer ohne assetId in {name!r}; Zustand unverändert.")
+            seen.add(str(asset_id))
             ids.setdefault(str(asset_id), None)
+        read += len(page["items"])
         _search_progress(f"Veritone {name!r}: lade Suche {len(ids)}/{page['totalCount']}")
-        if len(ids) == before or not page.get("hasNextPage"):  # A page without new assets would loop forever.
-            break
+        pages = -(-page["totalCount"] // veritone_page_size)  # Upper bound, so a wrong hasNextPage cannot loop forever.
+        if not page["items"] or not page.get("hasNextPage") or params["i"] + 1 >= pages:
+            return page["totalCount"], read, len(seen)
         params["i"] += 1
-    if len(ids) != page["totalCount"]:
-        raise RuntimeError(f"Veritone-Suche für {name!r} unvollständig: {len(ids)} von {page['totalCount']} Assets gelesen; "
-                           f"Zustand unverändert.")
-    return list(ids)
 
 
-def _veritone_barcodes(name: str, asset_ids: list[str], token: str, ctx: dict) -> tuple[dict[str, tuple[str, str]], int]:
-    """Barcodes of one collection as {normalized: (barcode, assetId)} and the number of assets without one (reported)."""
-    field, barcodes, missing = cfg["field_clip_id"], {}, 0
+def _veritone_assets(entry: dict, token: str) -> tuple[list[str], int]:
+    """Asset IDs of one collection and the passes needed; raises unless totalCount assets were found in time."""
+    name, ids = entry["name"], {}
+    for number in range(1, veritone_passes + 1):
+        total, read, distinct = _veritone_pages(entry, token, ids)
+        if len(ids) >= total:
+            return list(ids), number
+        _log(f"Veritone-Suche {name!r}, Durchlauf {number}/{veritone_passes}: {read} Treffer gelesen, davon {read - distinct} "
+             f"doppelt; bisher {len(ids)} von {total} Assets.")
+    raise RuntimeError(f"Veritone-Suche für {name!r} unvollständig: {len(ids)} von {total} Assets nach {veritone_passes} "
+                       f"Durchläufen; Zustand unverändert.")
+
+
+def _veritone_barcodes(name: str, asset_ids: list[str], token: str, ctx: dict) -> tuple[dict[str, tuple[str, str]], int, int]:
+    """Barcodes of one collection as {normalized: (barcode, assetId)}, assets without one (reported) and placeholders.
+
+    Placeholder assets are ignored completely, like placeholders in the EditShare search.
+    """
+    field, codec_field = cfg["field_clip_id"], veritone_placeholder[0]
+    barcodes, missing, placeholders = {}, 0, 0
     for start in range(0, len(asset_ids), veritone_page_size):
         batch = asset_ids[start:start + veritone_page_size]
-        data = _veritone_get("/v1/clip/byIds", token, {"ids": ",".join(batch), "fields": field})
+        data = _veritone_get("/v1/clip/byIds", token, {"ids": ",".join(batch), "fields": f"{field},{codec_field}"})
         clips = data.get("list") if isinstance(data, dict) else None
         if not isinstance(clips, list):
             raise RuntimeError(f"Unerwartete Veritone-Antwort auf byIds für {name!r}; Zustand unverändert.")
-        values = defaultdict(list)
+        values, codecs = defaultdict(list), defaultdict(set)
         for clip in (clip for clip in clips if isinstance(clip, dict)):
             values[str(clip.get("id"))] += _item_values(clip, field)
+            codecs[str(clip.get("id"))] |= {value.casefold() for value in _item_values(clip, codec_field)}
         for asset_id in batch:
+            if veritone_placeholder[1] in codecs[asset_id]:
+                placeholders += 1
+                continue
             if not values[asset_id]:
                 missing += 1
                 _issue(ctx, "veritone_only", barcode_missing, f"{name}#{asset_id}", f"Kollektion={name}, assetId={asset_id}")
             for barcode in values[asset_id]:
                 barcodes.setdefault(_normalize(barcode), (barcode, asset_id))
         _search_progress(f"Veritone {name!r}: lade Barcodes {start + len(batch)}/{len(asset_ids)}")
-    if asset_ids and not barcodes:
+    if len(asset_ids) > placeholders and not barcodes:
         raise RuntimeError(f"Veritone liefert in {name!r} kein Feld {field!r}; [veritone] field_clip_id prüfen. "
                            f"Zustand unverändert.")
-    return barcodes, missing
+    return barcodes, missing, placeholders
 
 
 def _veritone_clip_ids(mapping: list[dict], token: str, ctx: dict) -> dict[str, dict[str, tuple[str, str]]]:
@@ -1061,10 +1081,10 @@ def _veritone_clip_ids(mapping: list[dict], token: str, ctx: dict) -> dict[str, 
     result = {}
     for entry in mapping:
         name, started = entry["name"], perf_counter()
-        assets = _veritone_assets(entry, token)
-        result[name], missing = _veritone_barcodes(name, assets, token, ctx)
-        _log(f"Veritone-Abfrage abgeschlossen: {name!r}: {len(assets)} Assets, {len(result[name])} Barcodes"
-             f"{f', {missing} ohne Barcode' if missing else ''}; {perf_counter() - started:.1f} s.")
+        assets, passes = _veritone_assets(entry, token)
+        result[name], missing, placeholders = _veritone_barcodes(name, assets, token, ctx)
+        _log(f"Veritone-Abfrage abgeschlossen: {name!r}: {len(assets)} Assets ({passes} Durchl.), {placeholders} Platzhalter, "
+             f"{len(result[name])} Barcodes{f', {missing} ohne Barcode' if missing else ''}; {perf_counter() - started:.1f} s.")
     return result
 
 

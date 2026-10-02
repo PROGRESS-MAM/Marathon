@@ -1,4 +1,4 @@
-# Marathon 1.4
+# Marathon 1.4.2
 
 Index, Job-Steuerung und Berichte für die Proxy-Erstellung (Restore → Transcode → QC) aus EditShare-Kollektionen.
 
@@ -48,12 +48,13 @@ Aliase: `manual-report`, `manueller-report` → `report`; `auto-report-on` → `
 ## update-index
 
 1. EditShare-Suche je Kollektion mit den `filters` aus collections.json.
-2. Veritone-Suche je Kollektion mit den `veritone_filter_ids`, anschließend Barcodes (`field_clip_id`) aller Treffer.
+2. Veritone-Suche je Kollektion mit den `veritone_filter_ids`, anschließend Barcodes (`field_clip_id`) aller Treffer. Platzhalter (`Production.Codec` = Placeholder) werden komplett ignoriert und nur im Log gezählt.
 3. Abgleich je Kollektion: `001 Identifier` = Barcode (Groß-/Kleinschreibung und Leerzeichen am Rand egal, sonst exakt, z. B. `DEFA13815` ≠ `DEFA13815_1`).
 4. Nur Clips der Schnittmenge ohne weitere Probleme werden neu in die JSON aufgenommen.
 
 Bereits vorhandene Clips der JSON werden nie geändert; Abweichungen (z. B. „Nicht mehr bei Veritone“) werden nur gemeldet, die Clips laufen weiter.
-Bricht die EditShare- oder Veritone-Abfrage ab (Netz, HTTP-Fehler, unvollständige Seiten), bleibt die JSON unverändert.
+Liefert die Veritone-Suche weniger Assets als gemeldet, sucht Marathon die Kollektion bis zu 3-mal erneut (Log: „Durchlauf …“).
+Bricht die EditShare- oder Veritone-Abfrage ab (Netz, HTTP-Fehler, nach 3 Durchläufen immer noch unvollständig), bleibt die JSON unverändert.
 
 Das Log zeigt je Kollektion: EditShare, Veritone, Schnittmenge, nur EditShare, nur Veritone.
 
