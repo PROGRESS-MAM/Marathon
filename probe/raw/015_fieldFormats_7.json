@@ -1,0 +1,39 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/clip/fieldFormats",
+    "params": {
+      "fieldNames": "AiWare.Report.All.70,AiWare.Report.All.19,AiWare.Report.All.17,AiWare.Report.All.18,AiWare.Report.All.15,AiWare.Report.All.59,AiWare.Report.All.16,AiWare.Report.All.13,AiWare.Report.All.57,AiWare.Report.All.14,AiWare.Report.All.58,AiWare.Report.All.4,AiWare.Report.All.22,AiWare.Report.All.66,AiWare.Report.All.5,AiWare.Report.All.23,AiWare.Report.All.67,AiWare.Report.All.2,AiWare.Report.All.20,AiWare.Report.All.64,AiWare.Report.All.3,AiWare.Report.All.21,AiWare.Report.All.65,AiWare.Report.All.62,AiWare.Report.All.1,AiWare.Report.All.63,AiWare.Report.All.60,AiWare.Report.All.61,AiWare.Report.All.8,AiWare.Report.All.9,AiWare.Report.All.6,AiWare.Report.All.7,AiWare.TDO.Id,AiWare.Transcription.Timeline,Rights.EditorialUse,Rights.Geography,Rights.Control.Clips,created,format,purpose"
+    },
+    "body": null
+  },
+  "status": 200,
+  "response": [
+    {
+      "name": "AiWare.TDO.Id",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "AiWare.Transcription.Timeline",
+      "dataType": "timeline",
+      "array": false
+    },
+    {
+      "name": "Rights.EditorialUse",
+      "dataType": "paragraph",
+      "array": false
+    },
+    {
+      "name": "Rights.Geography",
+      "dataType": "paragraph",
+      "array": false
+    },
+    {
+      "name": "Rights.Control.Clips",
+      "dataType": "text",
+      "delimiter": ",",
+      "array": false
+    }
+  ]
+}

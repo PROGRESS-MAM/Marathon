@@ -1,0 +1,425 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/clip/60228265/clipDetail",
+    "params": null,
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "assetId": 60228265,
+    "detailTypeMap": {
+      "lastUpdated": "2025-01-21T11:40:48Z",
+      "createdOn": "2022-06-24T04:29:55Z",
+      "id": 299,
+      "siteName": "progress",
+      "name": "Anonymous",
+      "filter": "true",
+      "primary": [
+        {
+          "value": "Footage",
+          "name": "Resource.Class"
+        },
+        {
+          "value": "High Definition",
+          "name": "TE.DigitalFormat"
+        },
+        {
+          "value": "screener",
+          "name": "Resource.Family"
+        },
+        {
+          "value": "Progress",
+          "name": "SI.Owner"
+        },
+        {
+          "value": "DEFA05341",
+          "name": "Supplier.Barcode"
+        },
+        {
+          "name": "Supplier.Title",
+          "value": "Der Augenzeuge 1964/03"
+        },
+        {
+          "value": "1964",
+          "name": "Description.Date"
+        },
+        {
+          "value": "1964",
+          "name": "Production.Shoot.Year"
+        },
+        {
+          "value": "DEFA",
+          "name": "Supplier.Source"
+        },
+        {
+          "value": "East German Newsreel \"Der Augenzeuge\"",
+          "name": "Supplier.Collection"
+        },
+        {
+          "value": "No",
+          "name": "Production.Edit.Color"
+        },
+        {
+          "value": "Yes",
+          "name": "Audio.Notes"
+        },
+        {
+          "value": "1. Millionen Juden klagen an\\nDer \"Augenzeuge\" besuchte den größten Jüdischen Friedhof Deutschlands in Berlin-Weißensee und berichtet über den Auschwitz-Prozess in Frankfurt am Main (68 m)\\nkurz berichtet\\n2. Papst Paul VI. an den heiligen Stätten der Christenheit (Jordanien und Israel) (27 m)\\n3. Internationale Solidarität für Kuba (19 m)\\n4. Hochhausbau im Warschauer Stadtzentrum (19 m)\\n5. Wahl der Miss Katze in Rotterdam (26 m)\\nReportage\\n6. ... über den Betriebs- und Abstellbahnhof Berlin-Rummelsburg (55 m)\\nSport im Bild\\n7. Prag: Die Welt-Elite der Eiskunstläufer traf sich im Eispalast (33 m)\\n8. Oberhof: Dritte Serie der vier Sprunglauf-Qualifikations-Wettbewerbe für die Olympischen Winterspiele",
+          "name": "Description.DE"
+        },
+        {
+          "value": "1. million Jews on trial\\nThe \"Eyewitness\" visited Germany's largest Jewish cemetery in Berlin-Weißensee and reports on the Auschwitz trial in Frankfurt am Main (68 m)\\nbriefly reported\\n2 Pope Paul VI at the holy places of Christianity (Jordan and Israel) (27 m)\\n3. international solidarity for Cuba (19 m)\\n4. high-rise construction in Warsaw city centre (19 m)\\n5. election of Miss Cat in Rotterdam (26 m)\\nReportage\\n6. ... about the Berlin-Rummelsburg depot (55 m)\\nSport in the picture\\n7. Prague: The world elite of figure skaters met in the Ice Palace (33 m)\\n8. Oberhof: Third series of the four ski jumping qualification competitions for the Winter Olympics",
+          "name": "Description.EN"
+        }
+      ],
+      "secondary": [
+        {
+          "content_details": {
+            "name": "content_details",
+            "data": [
+              {
+                "section": [
+                  {
+                    "value": "Der Augenzeuge 1964/03",
+                    "name": "Supplier.Title"
+                  },
+                  {
+                    "value": "Der Augenzeuge 1964/03",
+                    "name": "Title.DE"
+                  },
+                  {
+                    "value": "Der Augenzeuge 1964/03",
+                    "name": "Title.EN"
+                  },
+                  {
+                    "name": "Production.Shoot.Decade",
+                    "value": "1960"
+                  },
+                  {
+                    "name": "Production.Original.AirDate"
+                  },
+                  {
+                    "value": "1. Millionen Juden klagen an\\nDer \"Augenzeuge\" besuchte den größten Jüdischen Friedhof Deutschlands in Berlin-Weißensee und berichtet über den Auschwitz-Prozess in Frankfurt am Main (68 m)\\nkurz berichtet\\n2. Papst Paul VI. an den heiligen Stätten der Christenheit (Jordanien und Israel) (27 m)\\n3. Internationale Solidarität für Kuba (19 m)\\n4. Hochhausbau im Warschauer Stadtzentrum (19 m)\\n5. Wahl der Miss Katze in Rotterdam (26 m)\\nReportage\\n6. ... über den Betriebs- und Abstellbahnhof Berlin-Rummelsburg (55 m)\\nSport im Bild\\n7. Prag: Die Welt-Elite der Eiskunstläufer traf sich im Eispalast (33 m)\\n8. Oberhof: Dritte Serie der vier Sprunglauf-Qualifikations-Wettbewerbe für die Olympischen Winterspiele",
+                    "name": "Description.DE"
+                  },
+                  {
+                    "value": "1. million Jews on trial\\nThe \"Eyewitness\" visited Germany's largest Jewish cemetery in Berlin-Weißensee and reports on the Auschwitz trial in Frankfurt am Main (68 m)\\nbriefly reported\\n2 Pope Paul VI at the holy places of Christianity (Jordan and Israel) (27 m)\\n3. international solidarity for Cuba (19 m)\\n4. high-rise construction in Warsaw city centre (19 m)\\n5. election of Miss Cat in Rotterdam (26 m)\\nReportage\\n6. ... about the Berlin-Rummelsburg depot (55 m)\\nSport in the picture\\n7. Prague: The world elite of figure skaters met in the Ice Palace (33 m)\\n8. Oberhof: Third series of the four ski jumping qualification competitions for the Winter Olympics",
+                    "name": "Description.EN"
+                  },
+                  {
+                    "value": "Wochenschau",
+                    "name": "Production.Genre.DE"
+                  },
+                  {
+                    "value": "Newsreel",
+                    "name": "Production.Genre.EN"
+                  },
+                  {
+                    "name": "ContentNotes.DE"
+                  },
+                  {
+                    "name": "ContentNotes.EN"
+                  }
+                ]
+              },
+              {
+                "section": [
+                  {
+                    "value": "Deutsche Demokratische Republik (DDR)",
+                    "name": "Production.CountryOfOrigin.DE"
+                  },
+                  {
+                    "value": "Germany (East)",
+                    "name": "Production.CountryOfOrigin.EN"
+                  },
+                  {
+                    "name": "Production.CountryOfAction.DE"
+                  },
+                  {
+                    "name": "Production.CountryOfAction.EN"
+                  },
+                  {
+                    "name": "Production.RegionOfOrigin.DE"
+                  },
+                  {
+                    "name": "Production.RegionOfOrigin.EN"
+                  },
+                  {
+                    "name": "Production.CityOfOrigin.DE"
+                  },
+                  {
+                    "name": "Production.CityOfOrigin.EN"
+                  }
+                ]
+              },
+              {
+                "section": [
+                  {
+                    "value": "Religion; Katholizismus; Papst; Judentum; Gericht; Baudenkmal; Jüdischer Friedhof; Kuba; Luftverkehr; Warschau; Hochhaus; Stadt; Katze; Schienenverkehr; Eiskunstlauf; Prag; Skispringen; Olympia",
+                    "name": "Keywords.DE"
+                  },
+                  {
+                    "value": "Religion; Catholicism; Pope; Judaism; Court; Monument; Jewish cemetery; Cuba; Air traffic; Warsaw; Skyscraper; City; Cat; Rail traffic; Figure skating; Prague; Ski jumping; Olympics",
+                    "name": "Keywords.EN"
+                  },
+                  {
+                    "name": "Keywords"
+                  },
+                  {
+                    "value": "Giovanni Battista Enrico Antonio Maria Montini (Papst Paul VI.)",
+                    "name": "Production.Talent.Cast.Principals.DE"
+                  },
+                  {
+                    "value": "Giovanni Battista Enrico Antonio Maria Montini (Pope Paul VI)",
+                    "name": "Production.Talent.Cast.Principals.EN"
+                  },
+                  {
+                    "value": "Josef Schwarz",
+                    "name": "Production.Talent.Cast.Extras.DE"
+                  },
+                  {
+                    "value": "Josef Schwarz",
+                    "name": "Production.Talent.Cast.Extras.EN"
+                  },
+                  {
+                    "value": "1. Jüdischer Friedhof Berlin / Weißensee: Kameraschwenk über Gräber; verschiedene Grabsteine sind zu sehen; Denkmal für die im 1. Weltkrieg gefallenen jüdischen Soldaten; Mausoleum des Opernsängers Josef Schwarz; Verschieden Grabsteininschriften von im 2. Weltkrieg ermordeten Juden; Steinplatten mit denn Inschriften: Theresienstadt, Dachau, Auschwitz. Ein Büro; verschiedene Ordner im Aktenschrank mit den Aufschriften: Zyklon B, Gaskammern, Krematorien, Exekutionen; Frankfurt am Main. Mehrere Männer, die angeklagt sind im 3. Reich Juden ermordet zu haben, betreten nach einander den Gerichtssaal; Richter spricht\\n\\n\"Kurz berichtet\"\\n2. Papst Paul der VI besucht heilige Stätten des Christentums in Jordanien und Israel; er betet mit anderen Geistlichen zusammen; Telegramm vom Papst an Walter Ulbricht\\n\\n3. Kuba - Spendenpakete für die Opfer des Hurrikan Flora werden aus Flugzeug entladen\\n\\n4. Warschau - Bau neuer Wolkenkratzer im Stadtzentrum; Kameraschwenk über die Stadt\\n\\n5. Katzenschau in Rotterdam: Katzen werden von Jury begutachtet; verschiedene Tiere sind zu sehen\\n\\n\"Repotage\"\\n6. Berlin - Betriebs- und Abstellbahnhof Rummelsburg: Wagons werden gesäubert; Zug beim rangieren\\n\\n\"Sport im Bild\"\\n7. Prager Eispalast: Einlauf der Eiskunstläufer; Ein sowjetische bei ihrem Auftritt; die Weltmeister im Eistanz aus der CSSR Romanova / Roman auf dem Eis\\n\\n8. - 3. Serie der Qualifikation für den Skisprungwettbewerb bei Olympia; verschiedene Athleten bei ihren Sprüngen; Max Bolkart, Dieter Neuendorf, Happle, Georg Thoma, Karlheinz Munk und Dieter Bokeloh",
+                    "name": "Production.Shotlist.DE"
+                  },
+                  {
+                    "value": "1. Jewish Cemetery Berlin / Weißensee: Camera panning over graves; various gravestones can be seen; Monument to the Jewish soldiers killed in World War I; Mausoleum of the opera singer Josef Schwarz; Various gravestone inscriptions of Jews murdered in World War II; Stone slabs with inscriptions: Theresienstadt, Dachau, Auschwitz. An office; various files in the filing cabinet with the inscriptions: Cyclone B, gas chambers, crematoria, executions; Frankfurt am Main. Several men accused of murdering Jews in the 3rd Reich enter the courtroom one by one; Judge speaks\\n\\n\"Briefly reported\"\\n2. pope Paul VI visits holy sites of Christianity in Jordan and Israel; he prays together with other clergy; telegram from pope to Walter Ulbricht\\n\\n3. Cuba - Donation packages for the victims of Hurricane Flora unloaded from aircraft\\n\\n4. Warsaw - construction of new skyscrapers in the city centre; camera panning over the city\\n\\n5. cat show in Rotterdam: Cats are judged by jury; different animals are to be seen\\n\\n\"Repotage\"\\n6. Berlin - Depot and parking station Rummelsburg: wagons cleaned; train shunting\\n\\n\"Sport in the picture\"\\n7. Prague Ice Palace: Ice skaters' arrival; a Soviet one at their performance; the world champions in ice dance from the CSSR Romanova / Roman on the Ice\\n\\n8. - 3rd series of qualification for the ski jumping competition at Olympia; different athletes during their jumps; Max Bolkart, Dieter Neuendorf, Happle, Georg Thoma, Karlheinz Munk und Dieter Bokeloh",
+                    "name": "Production.Shotlist.EN"
+                  },
+                  {
+                    "name": "Production.Shotlist"
+                  },
+                  {
+                    "value": "Deutsch",
+                    "name": "Production.Language.Original.DE"
+                  },
+                  {
+                    "value": "German",
+                    "name": "Production.Language.Original.EN"
+                  }
+                ]
+              }
+            ]
+          },
+          "cast_crew": {
+            "name": "cast_crew",
+            "data": [
+              {
+                "section": [
+                  {
+                    "name": "Production.Talent.Director.DE"
+                  },
+                  {
+                    "name": "Production.Talent.Director.EN"
+                  },
+                  {
+                    "name": "Production.Talent.Cameraman.DE"
+                  },
+                  {
+                    "name": "Production.Talent.Cameraman.EN"
+                  },
+                  {
+                    "name": "Production.Actor.DE"
+                  },
+                  {
+                    "name": "Production.Actor.EN"
+                  },
+                  {
+                    "name": "Production.Talent.Editor.DE"
+                  },
+                  {
+                    "name": "Production.Talent.Editor.EN"
+                  },
+                  {
+                    "name": "Production.Talent.Producer.DE"
+                  },
+                  {
+                    "name": "Production.Talent.Producer.EN"
+                  },
+                  {
+                    "name": "Production.Talent.Director.Photography.DE"
+                  },
+                  {
+                    "name": "Production.Talent.Director.Photography.EN"
+                  },
+                  {
+                    "name": "Production.Talent.Composer.DE"
+                  },
+                  {
+                    "name": "Production.Talent.Composer.EN"
+                  }
+                ]
+              },
+              {
+                "section": [
+                  {
+                    "value": "DEFA-Studio für Wochenschau und Dokumentarfilme",
+                    "name": "Production.Studio.DE"
+                  },
+                  {
+                    "value": "DEFA studio for newsreel and documentary films",
+                    "name": "Production.Studio.EN"
+                  }
+                ]
+              }
+            ]
+          },
+          "technical_details": {
+            "name": "technical_details",
+            "data": [
+              {
+                "section": [
+                  {
+                    "value": "Video",
+                    "name": "Production.Format"
+                  },
+                  {
+                    "value": "Yes",
+                    "name": "Production.Edit.Digitized"
+                  }
+                ]
+              }
+            ]
+          },
+          "related_assets": {
+            "name": "related_assets",
+            "data": [],
+            "relatedQuery": [
+              {
+                "name": "Related Assets",
+                "relatedQueryId": 91,
+                "pageSize": 20,
+                "sortId": 912
+              },
+              {
+                "name": "More from the same Genre",
+                "relatedQueryId": 99,
+                "pageSize": 20,
+                "sortId": 912
+              }
+            ]
+          },
+          "timeline": {
+            "name": "timeline",
+            "data": [
+              {
+                "section": [
+                  {
+                    "value": "[15;27-23;29] Der Jüdische Friedhof in Berlin Weißensee. 1880 wurde er geweiht. [24;11-30;05] 113.000 Menschen haben auf diesem größten Friedhof Deutschlands ihre letzte Ruhe gefunden. [38;27-43;05] Der Ehren Hain für die gefallenen jüdischen Soldaten des Ersten Weltkrieges. [44;28-50;16] 113.000 jüdische Menschen fanden hier bis 1938 ihre letzte Ruhe. [50;26-52;25] Wie groß müsste der Friedhof sein, [52;25-56;04] der all die jüdischen Opfer des Faschismus aufnehmen sollte? [56;22-01:04;07] Das Mausoleum des 1926 verstorbenen Opernsänger Josef Schwarz. Illegal lebende Juden retteten sich, [01:04;07-01:07;09] indem sie Asyl unter dem Dach des Grabmal fanden. [01:19;27-01:28;07] Gedenktafeln und Asche. Einzige Erinnerung an 55.000 Berliner Juden Männer. Frauen, [01:28;28-01:29;16] Kinder. [01:41;19-01:45;13] Auschwitz ein Wort, das die Hölle bedeutete, schlimmer noch, [01:45;13-01:51;19] das den Gas Tod bedeutete. Und das sind Bestien, [01:51;19-01:56;18] die der Hölle vorstanden, die vergasten und erschossen, hängten und erschlugen. [01:57;03-02:02;21] 18 Jahre nach Kriegsende stehen sie vor einem westdeutschen Gericht, ungerührt und arrogant. [02:03;05-02:06;15] Sie, die 18 Jahre lang als wohlsituierte Bürger lebten, [02:07;02-02:10;17] nicht auf der Anklagebank sitzen die Herren von IG Farben, [02:10;17-02:16;01] die Lieferanten des Giftgas Zyklon B, die Organisatoren des perfekten Mordes. [02:16;13-02:20;07] Zusammen mit dem Gericht aber klagen 6 Millionen jüdische Opfer an [02:20;07-02:24;14] und verlangen endlich Sühne für dieses größte Verbrechen in der Weltgeschichte. [02:34;24-02:37;09] Seit dem Apostel Petrus ist kein Papst mehr [02:37;09-02:40;03] zu den heiligen Stätten des Christentums zurückgekehrt. [02:40;10-02:43;23] Papst Paul sechste trat als erstes katholisches Oberhaupt [02:43;23-02:46;05] eine Reise nach Jordanien und Israel an. [02:50;29-02:56;11] Und an dieser Stelle soll nach der Überlieferung der Apostel Johannes Christus getauft haben. [02:57;02-03:02;20] Die Politik seines Vorgängers, Papst Johannes 23 fortsetzend, richtete Paul sechs. [03:02;27-03:04;26] Die Bitte an alle Staatschefs der Welt, [03:04;27-03:09;25] den Frieden zu erhalten und bei dieser Aufgabe nachhaltiger zusammenzuarbeiten. [03:10;08-03:15;04] Von Jerusalem aussandte der Papst an den Staatsratsvorsitzenden Walter Ulbricht ein Telegramm, [03:15;04-03:18;23] in dem es hieß Wir versichern Sie unseres Gebetes zum Herrn [03:18;23-03:23;15] für Wohlergehen und Frieden aller Völker in Gerechtigkeit und Liebe. [03:32;20-03:35;12] Immer noch kämpft Kuba um die Beseitigung der Schäden, [03:35;12-03:38;02] die der Hurrikan Flora auf der Insel anrichtete. [03:38;11-03:41;17] Aus allen Teilen der Welt trafen Spenden in Kuba ein, [03:41;17-03:46;08] aus der UdSSR und England, Frankreich und Kanada, Mexiko, China, [03:46;08-03:54;27] der DDR und vielen anderen Nationen. Nahrungsmittel, [03:54;27-04:00;13] Textilien und Medikamente wurden sofort umgeladen und in die betroffenen Gebiete gebracht. [04:00;20-04:06;14] Ministerpräsident Fidel Castro erklärte, dass die eigene Kraft und die internationale Solidarität, [04:06;14-04:13;23] die Natur, Schäden überwinden werden. Warschau baut. [04:14;02-04:17;05] Inmitten des Stadtzentrums entstehen neue Wohnhäuser. [04:41;04-04:45;01] Ein Blick von einem der 24 stöckigen Wolkenkratzer auf die Stadt, [04:45;07-04:49;19] die wirklich schwindelfrei seien. Erbauer dieser Häuser versicherten unserem Kameramann, [04:49;19-04:53;03] dass der stählerne Rundbau bald von den Mietern bezogen werden kann. [04:54;16-04:56;14] Im Dunkeln sind alle Katzen grau. [04:56;22-04:59;28] Im Lichte der Scheinwerfer und bei der internationalen Katzenstreu. [05:00;06-05:04;09] In Rotterdam aber funkeln sie mit Augen und Fell in allen Schattierungen. [05:06;03-05:09;12] Ob das der oder ist es eine, die Sieger sein wird. [05:29;20-05:32;17] Sollte diese Dame oder der Herr? Nein, [05:32;17-05:36;28] so schnell kann wohl keinem dieser Exemplare das Fell über die Ohren gezogen werden. [05:44;25-05:47;07] Katzen sind doch was Niedliches, nicht wahr? [05:55;03-05:58;26] Größter Verkehrsbetrieb unserer Republik ist die Deutsche Reichsbahn. [05:59;06-06:03;13] Schnee und Frost stellen an die Eisenbahner besonders hohe Anforderungen. [06:03;19-06:07;24] Auf dem Betriebs und Bahnhof Rummelsburg, dem bedeutendsten in Berlin, [06:07;25-06:10;06] sind die Arbeitsbedingungen hart geworden. [06:16;15-06:19;03] Nicht nur das Reinigen der Wagen wird hier erledigt, [06:19;03-06:22;13] erschwert durch die angeborene Sauberkeit einiger Reisender. [06:22;22-06:27;07] Die ankommenden Lehr züge werden technisch überprüft, neu zusammengestellt, [06:27;07-06:35;24] um rangiert und dann wieder für den nationalen oder internationalen Reiseverkehr freigegeben. Du. [06:46;20-06:49;15] In einem Wettbewerb verpflichteten sich die Eisenbahner, [06:49;15-06:54;05] die Leer Parks schnell und pünktlich wieder dem Berliner Ostbahnhof zu übergeben. [07:38;14-07:41;20] Trotz des Winters jetzt schon gute Fahrt während des [07:41;20-07:44;23] Sommers Fahrplans der Deutschen Reichsbahn in den Urlaub. [07:54;04-07:57;29] Im Prager Eispalast traf sich die Weltelite der Eiskunstläufer. Alles, [07:57;29-08:01;27] was bei Europa und Weltmeisterschaften Rang und Namen hatte, war hier vertreten. [08:02;08-08:05;08] Das bekannte sowjetische Paar Philosoph Proton Popow. [08:18;25-08:22;14] Die Weltmeister im Eis tanzen. Roman. Koffer. Roman CSSR. [08:40;17-08:45;04] Abschließend dokumentierte der Kanadier Jackson, dass er nach wie vor zur Weltspitze zählt. [09:03;02-09:07;27] Zur dritten Serie der insgesamt vier Qualifikations Wettbewerbe für die Olympischen Winterspiele [09:08;01-09:11;23] trafen sich die besten Spezial Sprung Läufer beider deutscher Staaten in Oberhof. [09:11;29-09:16;06] Von den westdeutschen Springern hatte nur noch Burghardt Aussicht, nach Innsbruck zu kommen. [09:18;10-09:26;12] Der bekannte westdeutsche Hubble. Apple schaffte nur Platz 23, [09:26;12-09:36;11] der oberste Offer Max Burkhardt. 69,5 Meter DDR. Springer Neuendorf. [09:40;14-09:50;21] Neuendorf wurde 6. Oktober aus Hinterzarten. Mit DDR Springer Schramm wurde Thoma Dritter. [09:50;25-10:02;26] Karlheinz Munk aus Zell an Melles. Sie ist. [10:03;03-10:08;01] Mit 77,5 Metern stellte Munk den Schanzen Rekord ein. Er wurde Zweiter. [10:08;06-10:09;07] Dieter Bock Low. [10:22;18-10:27;03] München Mit den Siegen in Oberhof und Klingenthal stellt [10:27;03-10:29;05] die DDR bis auf den Oberstdorf Erfolg hat, [10:29;05-10:35;25] alle Spezial Sprung Läufe für die Olympischen Winterspiele. Und.",
+                    "name": "AiWare.Transcription.Timeline"
+                  },
+                  {
+                    "name": "Transcription.Timeline.FR"
+                  },
+                  {
+                    "name": "AiWare.ObjectRecognition.Timeline"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "common": [
+        {
+          "name": "id",
+          "value": "60228265"
+        },
+        {
+          "name": "family",
+          "value": "screener"
+        },
+        {
+          "name": "ingested",
+          "value": "2025-07-15 12:56:16.0"
+        },
+        {
+          "name": "liveDate",
+          "value": "2025-07-15 12:56:17.0"
+        },
+        {
+          "name": "modified",
+          "value": "2026-09-21 12:27:04.0"
+        },
+        {
+          "name": "name",
+          "value": "1RVF3C_JBCE3SSZRS"
+        },
+        {
+          "value": "24 fps",
+          "name": "Format.FrameRate"
+        },
+        {
+          "value": "639625",
+          "name": "Format.Duration"
+        },
+        {
+          "value": "Rights Managed",
+          "name": "Rights.Reproduction"
+        }
+      ],
+      "renditionUseTypes": {
+        "stored": "clip30secPreview",
+        "dynamic": "clip30secPreview"
+      }
+    },
+    "resourceClass": "Footage",
+    "hasDownloadableComp": false,
+    "price": 1.0,
+    "accessPath": "ContentFilter",
+    "metaDataDefault": [
+      {
+        "name": "TE.DigitalFormat",
+        "value": "High Definition"
+      },
+      {
+        "name": "Resource.Class",
+        "value": "Footage"
+      },
+      {
+        "name": "Format.TimeStart",
+        "value": "01:00:00:00"
+      },
+      {
+        "name": "Format.FrameSize",
+        "value": "2048 x 1080"
+      },
+      {
+        "name": "Format.FrameRate",
+        "value": "24 fps"
+      },
+      {
+        "name": "Format.Duration",
+        "value": "639625"
+      },
+      {
+        "name": "AiWare.TDO.Id",
+        "value": "3710569294"
+      },
+      {
+        "name": "Rights.Reproduction",
+        "value": "Rights Managed"
+      },
+      {
+        "name": "clipIngested",
+        "value": "2025-07-15 12:56:16.0"
+      },
+      {
+        "name": "TE.ParentClip",
+        "value": ""
+      },
+      {
+        "name": "AiWare.Cloned.TDO.Ids",
+        "value": ""
+      },
+      {
+        "name": "Format.Duration.Display",
+        "value": "00:10:39"
+      }
+    ]
+  }
+}

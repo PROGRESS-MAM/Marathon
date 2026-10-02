@@ -1,238 +1,380 @@
 # --------- IMPORTS ---------
-import argparse
 import configparser
 import json
+import re
+import time
+import traceback
+from datetime import datetime
 from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
 # --------- STATIC ---------
-token_key = "vt_api_token"
-name_keys = ("name", "label", "displayName", "title", "filterName")
-id_keys = ("id", "filterId")
-count_keys = ("count", "docCount", "documentCount")
+token_keys = ("vt_api_token", "api_key", "apiKey", "token", "access_token")
+pair_name_keys = ("name", "fieldName")
+pair_value_keys = ("value", "values")
+deep_offset = 10000  # common result window limit of search engines
 
 # --------- CONFIG ---------
 app_name = "Veritone-Probe"
-app_version = "0.2"
+app_version = "0.4"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 probe_dir = project_dir / "probe"
-default_base_url = "https://crxextapi.pd.dmh.veritone.com/assets-api"
+raw_dir = probe_dir / "raw"
 timeout = 120
+# Web search: /search;sortId=913;filterIds=10196,10236 (Source DEFA, Genre Dokumentarfilm)
+sort_id = 913
+filter_ids = "10196,10236"
+barcode_field = "Supplier.Barcode"
+sample_size = 10
+full_details = 3
+max_page_size = 200
+value_width = 120
 
 
-# --------- FUNC: ACCESS ---------
-def _settings() -> tuple[str, Path]:
-    parser = configparser.ConfigParser(interpolation=None)
-    parser.read(res_dir / "config.ini", encoding="utf-8-sig")
-    base_url = parser.get("veritone", "base_url", fallback="").strip() or default_base_url
-    return base_url.rstrip("/"), res_dir / (parser.get("paths", "cred_file", fallback="").strip() or "cred.env")
-
-
-def _token(path: Path) -> str:
+# --------- FUNC: SETTINGS ---------
+def _read_token(path: Path) -> str:
     if not path.is_file():
-        raise SystemExit(f"{path} fehlt.")
-    for line in path.read_text(encoding="utf-8-sig").splitlines():
-        key, separator, value = line.strip().removeprefix("export ").partition("=")
-        if separator and key.strip() == token_key and value.strip().strip("\"'"):
-            return value.strip().strip("\"'")
-    raise SystemExit(f"{path}: {token_key} fehlt oder ist leer.")
-
-
-def _call(path: str, params: dict | None = None, body: dict | None = None, auth: str = "query"):
-    """GET or POST (with body) against the Assets API; returns (status, parsed JSON or text)."""
-    base_url, token_path = _settings()
-    token, params = _token(token_path), dict(params or {})
-    headers = {"Accept": "application/json"}
-    if auth == "bearer":
-        headers["Authorization"] = f"Bearer {token}"
+        raise SystemExit(f"Zugangsdatei {path} fehlt.")
+    text = path.read_text(encoding="utf-8-sig").strip()
+    if text.startswith("{"):
+        try:
+            values = json.loads(text)
+        except ValueError as exc:
+            raise SystemExit(f"{path}: kein gültiges JSON ({exc}).") from None
+        if not isinstance(values, dict):
+            raise SystemExit(f"{path}: JSON muss ein Objekt sein.")
     else:
-        params["api_key"] = token
-    if body is not None:
-        headers["Content-Type"] = "application/json"
-    url = f"{base_url}{path}" + (f"?{urlencode(params)}" if params else "")
-    request = Request(url, data=None if body is None else json.dumps(body).encode("utf-8"), headers=headers)
-    # Never print the URL, it may contain the token.
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            status, raw = response.status, response.read()
-    except HTTPError as exc:
-        status, raw = exc.code, exc.read()
-    except (URLError, OSError) as exc:
-        raise SystemExit(f"Veritone nicht erreichbar ({path}): {exc}") from None
-    text = raw.decode("utf-8", "replace")
-    try:
-        return status, json.loads(text)
-    except ValueError:
-        return status, text
+        values = {}
+        for line in text.splitlines():
+            key, separator, value = line.strip().removeprefix("export ").partition("=")
+            if separator:
+                values.setdefault(key.strip(), value.strip().strip("\"'"))
+    token = next((str(values[key]).strip() for key in token_keys if str(values.get(key) or "").strip()), "")
+    if not token:
+        raise SystemExit(f"{path}: keiner der Einträge {', '.join(token_keys)} vorhanden oder alle leer.")
+    return token
 
 
-def _ok(status: int, data, path: str):
-    if status != 200:
-        raise SystemExit(f"HTTP {status} auf {path}: {str(data)[:500]}")
-    return data
+def _load_settings() -> tuple[str, str]:
+    config_path = res_dir / "config.ini"
+    if not config_path.is_file():
+        raise SystemExit(f"{config_path} fehlt.")
+    parser = configparser.ConfigParser(interpolation=None)
+    parser.read(config_path, encoding="utf-8-sig")
+    values = {key: parser.get("veritone", key, fallback="").strip() for key in ("base_url", "token_file")}
+    missing = [key for key, value in values.items() if not value]
+    if missing:
+        raise SystemExit(f"{config_path}: [veritone] {', '.join(missing)} fehlt oder ist leer.")
+    return values["base_url"].rstrip("/"), _read_token(res_dir / values["token_file"])
 
 
-def _save(name: str, data) -> Path:
-    probe_dir.mkdir(exist_ok=True)
-    target = probe_dir / name
-    target.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    return target
+# --------- FUNC: API ---------
+class Api:
+    """Read-only GET client for the Assets API; records every call without the token."""
+
+    def __init__(self, base_url: str, token: str):
+        self.base_url, self.token, self.calls, self.files = base_url, token, [], []
+
+    def mask(self, text: str) -> str:
+        for secret in {self.token, quote(self.token, safe="")}:
+            text = text.replace(secret, "***")
+        return text
+
+    def get(self, name: str, path: str, params: dict | None = None):
+        """Returns (status, parsed JSON or text, raw file name, ms). Status 0 = not reachable."""
+        params = {key: value for key, value in (params or {}).items() if value is not None}
+        # Never print or store the URL, it contains the token.
+        url = f"{self.base_url}{path}?{urlencode({**params, 'api_key': self.token})}"
+        started = time.monotonic()
+        try:
+            with urlopen(Request(url, headers={"Accept": "application/json"}), timeout=timeout) as response:
+                status, raw = response.status, response.read()
+        except HTTPError as exc:
+            status, raw = exc.code, exc.read()
+        except (URLError, OSError) as exc:
+            status, raw = 0, str(exc).encode("utf-8")
+        ms = round((time.monotonic() - started) * 1000)
+        text = self.mask(raw.decode("utf-8", "replace"))
+        try:
+            data = json.loads(text)
+        except ValueError:
+            data = text
+        file = self._save(name, {"request": {"path": path, "params": params}, "status": status, "ms": ms, "response": data})
+        self.calls.append((path, params, status, ms, file))
+        return status, data, file, ms
+
+    def _save(self, name: str, data) -> str:
+        raw_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = re.sub(r"[^\w-]+", "_", name)[:80]
+        file_name = f"{len(self.files) + 1:03d}_{safe_name}.json"
+        (raw_dir / file_name).write_text(json.dumps(data, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        self.files.append(file_name)
+        return file_name
 
 
 # --------- FUNC: ANALYSIS ---------
-def _paths(data, prefix: str = ""):
-    """Yield (path, scalar value) for every leaf; name/value pairs are shown as <name>."""
+def _leaves(data, path: str = "", field: str = ""):
+    """Yield (path, field, value) for every scalar; name/value pairs yield the pair name as field and path <name>."""
     if isinstance(data, dict):
-        if isinstance(data.get("name"), str) and "value" in data and not isinstance(data["value"], (dict, list)):
-            yield f"{prefix}<{data['name']}>", data["value"]
+        name_key = next((key for key in pair_name_keys if isinstance(data.get(key), str)), None)
+        value_key = next((key for key in pair_value_keys if key in data), None)
+        values = data.get(value_key) if value_key else None
+        values = values if isinstance(values, list) else [values]
+        skip = set()
+        if name_key and value_key and not any(isinstance(value, (dict, list)) for value in values):
+            skip = {name_key, value_key}
+            for value in values:
+                yield f"{path}<{data[name_key]}>", data[name_key], value
         for key, value in data.items():
-            yield from _paths(value, f"{prefix}.{key}" if prefix else str(key))
+            if key not in skip:
+                yield from _leaves(value, f"{path}.{key}" if path else str(key), str(key))
     elif isinstance(data, list):
         for index, value in enumerate(data):
-            yield from _paths(value, f"{prefix}[{index}]")
+            yield from _leaves(value, f"{path}[{index}]", field)
     else:
-        yield prefix, data
+        yield path, field, data
 
 
-def _short(value, width: int = 100) -> str:
-    text = repr(value)
-    return text if len(text) <= width else text[:width - 3] + "..."
+def _field_values(data, field: str) -> list[str]:
+    return list(dict.fromkeys(str(value).strip() for _, name, value in _leaves(data) if name == field and str(value or "").strip()))
 
 
-def _outline(data, depth: int = 0):
-    """Print filter-like nodes (name, id, count) of the filter tree, indented by depth."""
+def _items(data) -> list:
+    items = data.get("items") if isinstance(data, dict) else None
+    return items if isinstance(items, list) else []
+
+
+def _clips(data) -> list:
+    """Clip objects of a byIds or clip response."""
+    if isinstance(data, dict) and isinstance(data.get("list"), list):
+        return data["list"]
     if isinstance(data, list):
-        for value in data:
-            _outline(value, depth)
-        return
-    if not isinstance(data, dict):
-        return
-    label = next((data[key] for key in name_keys if isinstance(data.get(key), str)), None)
-    if label is not None:
-        extras = [f"{key}={data[key]}" for key in (*id_keys, *count_keys) if key in data and not isinstance(data[key], (dict, list))]
-        print(f"{'  ' * depth}- {label}" + (f"  ({', '.join(extras)})" if extras else ""))
-    for value in data.values():
-        _outline(value, depth + (label is not None))
+        return data
+    return [data] if isinstance(data, dict) and "id" in data else []
 
 
-def _search(query: str, count: int) -> list:
-    data = _ok(*_call("/v1/search", {"q": query, "n": count, "i": 0}), "/v1/search")
-    print(f"totalCount={data.get('totalCount')}, Seitenfelder: {', '.join(key for key in data if key != 'items')}")
-    return data.get("items") or []
+def _asset_id(item) -> str | None:
+    return next((str(item[key]) for key in ("assetId", "id", "clipId") if isinstance(item, dict) and item.get(key) is not None), None)
 
 
-# --------- FUNC: COMMANDS ---------
-def cmd_check(args) -> None:
-    for auth in ("query", "bearer"):
-        status, data = _call("/v1/search", {"q": "", "n": 1}, auth=auth)
-        total = data.get("totalCount") if isinstance(data, dict) else None
-        print(f"Anmeldung per {auth:6}: HTTP {status}" + (f", totalCount={total}" if status == 200 else f", {str(data)[:200]}"))
+def _title(item) -> str:
+    values = {field.casefold(): str(value) for _, field, value in _leaves(item) if field.casefold() in ("title", "name") and value}
+    return values.get("title") or values.get("name", "")
 
 
-def cmd_filters(args) -> None:
-    data = _ok(*_call("/v1/filter/filterTree", {"counted": "true"}), "/v1/filter/filterTree")
-    print(f"Gespeichert: {_save('filter_tree.json', data)}")
-    _outline(data)
+def _total(data):
+    return data.get("totalCount") if isinstance(data, dict) else None
 
 
-def cmd_sample(args) -> None:
-    items = _search(args.query, args.count)
-    print(f"Gespeichert: {_save('sample.json', items)}")
-    for number, item in enumerate(items[:args.show], 1):
-        print(f"\n--- Treffer {number} ---")
-        for path, value in _paths(item):
-            print(f"{path} = {_short(value)}")
+def _page_info(data) -> dict:
+    return {key: data.get(key) for key in ("currentPage", "pageSize", "numberOfPages", "hasNextPage")} if isinstance(data, dict) else {}
 
 
-def cmd_find(args) -> None:
-    items, needle = _search(args.query or args.value, args.count), args.value.casefold()
-    hits = {}
-    for item in items:
-        for path, value in _paths(item):
-            text = str(value).casefold()
-            if needle == text or (args.contains and needle in text):
-                hits.setdefault(path, value)
-    print(f"Gespeichert: {_save('find.json', items)}")
-    print("\n".join(f"{path} = {_short(value)}" for path, value in hits.items()) or f"{args.value!r} in keinem Feld gefunden.")
+# --------- FUNC: REPORT ---------
+def _short(value, width: int = value_width) -> str:
+    text = " ".join((value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, default=str)).split())
+    return text if len(text) <= width else text[:width - 1] + "…"
 
 
-def cmd_formats(args) -> None:
-    data = _ok(*_call("/v1/clip/fieldFormats", {"fieldNames": ",".join(args.names)}), "/v1/clip/fieldFormats")
-    known = {entry.get("name"): entry for entry in data if isinstance(entry, dict)} if isinstance(data, list) else {}
-    for name in args.names:
-        print(f"{name}: " + (json.dumps(known[name], ensure_ascii=False) if name in known else "unbekannt"))
+def _cell(value) -> str:
+    return "–" if value is None or value == "" or value == [] else _short(value).replace("|", "\\|")
 
 
-def _expression(pairs: list[str], op: str) -> dict:
-    parts = []
-    for pair in pairs:
-        field, separator, value = pair.partition("=")
-        if not separator or not field.strip():
-            raise SystemExit(f"Bedingung {pair!r}: erwartet FELD=WERT")
-        parts.append({"fieldExpression": {"fieldName": field.strip(), "op": op, "value": value.strip()}})
-    return parts[0] if len(parts) == 1 else {"and": parts}
+class Report:
+    def __init__(self, mask):
+        self.mask, self.head, self.sections = mask, [], []
+
+    def section(self, title: str) -> None:
+        self.sections.append({"title": title, "status": "", "lines": []})
+
+    def line(self, text: str = "") -> None:
+        self.sections[-1]["lines"].append(self.mask(str(text)))
+
+    def table(self, headers: tuple, rows: list) -> None:
+        if not rows:
+            return self.line("_(keine Einträge)_\n")
+        self.line()
+        self.line("| " + " | ".join(headers) + " |")
+        self.line("|" + "---|" * len(headers))
+        for row in rows:
+            self.line("| " + " | ".join(_cell(value) for value in row) + " |")
+        self.line()
+
+    def render(self) -> str:
+        overview = [f"- {number}. {section['title']}: **{section['status']}**"
+                    for number, section in enumerate(self.sections, 1) if section["status"]]
+        parts = [*self.head, "", "**Übersicht**", "", *overview]
+        for number, section in enumerate(self.sections, 1):
+            status = f" – {section['status']}" if section["status"] else ""
+            parts += ["", f"## {number}. {section['title']}{status}", "", *section["lines"]]
+        return "\n".join(parts) + "\n"
 
 
-def cmd_test(args) -> None:
-    body = {"searchExpression": _expression(args.conditions, args.op), "pageSize": args.page_size}
-    print("Anfrage:", json.dumps(body["searchExpression"], ensure_ascii=False))
-    pages = []
-    for number in (0, 1):
-        data = _ok(*_call("/v1/search/advancedSearch", body={**body, "pageNumber": number}), "/v1/search/advancedSearch")
-        items = data.get("items") or []
-        pages.append(items)
-        info = {key: data.get(key) for key in ("totalCount", "currentPage", "pageSize", "numberOfPages", "hasNextPage")}
-        print(f"pageNumber={number}: {len(items)} Treffer, {info}")
-        if args.clip_field:
-            values = [value for item in items for path, value in _paths(item)
-                      if path == args.clip_field or path.endswith((f".{args.clip_field}", f"<{args.clip_field}>"))]
-            print(f"  {args.clip_field}: {values}")
-    print(f"Gespeichert: {_save('test.json', pages)}")
+class Skip(Exception):
+    """Step cannot run because a prerequisite is missing."""
 
 
-def cmd_collections(args) -> None:
-    import marathon
+# --------- FUNC: PROBE ---------
+class Probe:
+    def __init__(self, api: Api, base_url: str):
+        self.api, self.out = api, Report(api.mask)
+        self.out.head = [f"# {app_name} {app_version} – Report", "", f"- Zeitpunkt: {datetime.now():%Y-%m-%d %H:%M:%S}",
+                         f"- base_url: {base_url}", f"- Websuche: /search;sortId={sort_id};filterIds={filter_ids}",
+                         f"- API-Abfrage: GET /v1/search?sortId={sort_id}&filterIds={filter_ids}", f"- Identifier-Feld: {barcode_field}"]
+        self.params = {"q": "", "sortId": sort_id, "filterIds": filter_ids}
+        self.total, self.sample, self.barcodes, self.path, self.paging = None, [], {}, None, "nicht geprüft"
 
-    problem = marathon._load_config()
-    if problem:
-        raise SystemExit(problem)
-    mapping = marathon._load_mapping()
-    for name, ids in marathon._veritone_clip_ids(mapping).items():
-        print(f"{name}: {len(ids)} Clip IDs")
+    def _search(self, name: str, size: int, page: int = 0, **params):
+        return self.api.get(name, "/v1/search", {**self.params, **params, "n": size, "i": page})
+
+    def step_search(self) -> str:
+        status, data, file, ms = self._search("search_filter", sample_size)
+        self.total, items = _total(data), _items(data) if status == 200 else []
+        self.out.line(f"HTTP {status}, totalCount={self.total}, {len(items)} Treffer auf Seite 0, {ms} ms ({file})")
+        if status != 200:
+            self.out.line(f"Fehler: {_short(data, 300)}")
+            return "FEHLER"
+        self.out.line(f"Seitenfelder: {', '.join(key for key in data if key != 'items')}; Seiteninfo: {_page_info(data)}")
+        self.sample = [(asset_id, item) for item in items if (asset_id := _asset_id(item))]
+        self.out.table(("#", "assetId", "Titel"), [(number, asset_id, _title(item)) for number, (asset_id, item) in enumerate(self.sample, 1)])
+        rows = []
+        for label, params in (("ohne sortId", {"sortId": None}), *((f"nur filterIds={part}", {"filterIds": part}) for part in filter_ids.split(",")),
+                              ("ohne Filter", {"filterIds": None, "sortId": None})):
+            code, page, file, _ = self._search(f"count_{label}", 1, **params)
+            rows.append((label, code, _total(page), file))
+        self.out.line("Vergleich der Trefferzahl (n=1):")
+        self.out.table(("Variante", "HTTP", "totalCount", "Rohdaten"), rows)
+        return "OK" if self.sample else "UNKLAR"
+
+    def step_hit_fields(self) -> str:
+        if not self.sample:
+            raise Skip("Keine Suchtreffer (siehe Schritt 1).")
+        fields = list(dict.fromkeys(field for _, item in self.sample for _, field, _ in _leaves(item)))
+        rows = [(asset_id, _field_values(item, barcode_field)) for asset_id, item in self.sample]
+        self.out.line(f"Felder in den Suchtreffern: {', '.join(fields)}")
+        self.out.table(("assetId", barcode_field), rows)
+        found = sum(bool(values) for _, values in rows)
+        self.out.line(f"{barcode_field} in {found} von {len(rows)} Suchtreffern.")
+        if found == len(rows):
+            self.barcodes["Suchtreffer"] = dict(rows)
+            self.path = self.path or "Suchtreffer"
+        return "OK" if found == len(rows) else "UNKLAR"
+
+    def step_clip_fields(self) -> str:
+        if not self.sample:
+            raise Skip("Keine Suchtreffer (siehe Schritt 1).")
+        ids = [asset_id for asset_id, _ in self.sample]
+        first = ids[0]
+        requests = (("byIds+fields", "/v1/clip/byIds", {"ids": ",".join(ids), "fields": barcode_field}),
+                    ("byIds", "/v1/clip/byIds", {"ids": ",".join(ids[:full_details])}),
+                    ("clip+fields", f"/v1/clip/{first}", {"fields": barcode_field}),
+                    ("clip", f"/v1/clip/{first}", None))
+        rows, results = [], {}
+        for label, path, params in requests:
+            status, data, file, ms = self.api.get(f"barcode_{label}", path, params)
+            clips = _clips(data) if status == 200 else []
+            found = {str(clip.get("id")): _field_values(clip, barcode_field) for clip in clips if isinstance(clip, dict)}
+            results[label] = found
+            asked = len(params["ids"].split(",")) if params and "ids" in params else 1
+            fields = len(list(_leaves(clips[0]))) if clips else 0
+            rows.append((label, path, status, asked, len(clips), sum(bool(values) for values in found.values()), fields, ms,
+                         "" if status == 200 else _short(data, 100), file))
+        self.out.table(("Abfrage", "Pfad", "HTTP", "IDs angefragt", "Clips erhalten", "mit Barcode", "Felder je Clip", "ms", "Fehler", "Rohdaten"), rows)
+        self.out.line("Barcode je Clip:")
+        self.out.table(("assetId", *results), [(asset_id, *(results[label].get(asset_id) for label in results)) for asset_id in ids])
+        for label, path, params in requests:
+            asked = params["ids"].split(",") if params and "ids" in params else [first]
+            if asked and all(results[label].get(asset_id) for asset_id in asked):
+                self.barcodes[label] = results[label]
+                self.path = self.path or label
+        self.out.line(f"Erster vollständiger Pfad: **{self.path or 'keiner'}**")
+        return "OK" if self.path else "FEHLER"
+
+    def step_bulk(self) -> str:
+        if self.path != "byIds+fields":
+            raise Skip("Nur nötig, wenn der Barcode über byIds+fields kommt.")
+        status, data, file, ms = self._search("search_max_page", max_page_size)
+        ids = [asset_id for item in _items(data) if (asset_id := _asset_id(item))] if status == 200 else []
+        self.out.line(f"Suche n={max_page_size}: HTTP {status}, {len(ids)} assetIds, {ms} ms ({file})")
+        if not ids:
+            return "FEHLER"
+        code, clips, file, ms = self.api.get("barcode_bulk", "/v1/clip/byIds", {"ids": ",".join(ids), "fields": barcode_field})
+        found = [clip for clip in _clips(clips) if isinstance(clip, dict) and _field_values(clip, barcode_field)] if code == 200 else []
+        self.out.line(f"byIds+fields mit {len(ids)} IDs: HTTP {code}, {len(_clips(clips)) if code == 200 else 0} Clips, "
+                      f"{len(found)} mit Barcode, {ms} ms ({file})" + ("" if code == 200 else f"; Fehler: {_short(clips, 200)}"))
+        return "OK" if len(found) == len(ids) else "UNKLAR"
+
+    def step_paging(self) -> str:
+        if not self.total:
+            raise Skip("Keine Trefferzahl (siehe Schritt 1).")
+        rows, pages = [], []
+        for page in (0, 1):
+            status, data, file, _ = self._search(f"paging_{page}", 5, page)
+            ids = [_asset_id(item) for item in _items(data)]
+            pages.append(ids)
+            rows.append((f"i={page}, n=5", status, len(ids), ids, _page_info(data), file))
+        last = (self.total - 1) // max_page_size
+        checks = [("letzte Seite", last, self.total - last * max_page_size)]
+        if self.total > deep_offset:
+            checks.insert(0, (f"über {deep_offset}", deep_offset // max_page_size + 1, max_page_size))
+        results = []
+        for label, page, expected in checks:
+            status, data, file, _ = self._search(f"paging_{label}", max_page_size, page)
+            count = len(_items(data)) if status == 200 else 0
+            results.append(count == expected)
+            rows.append((f"{label}: i={page}, n={max_page_size} (erwartet {expected})", status, count, "", _page_info(data) or _short(data, 100), file))
+        self.out.table(("Abfrage", "HTTP", "Treffer", "IDs", "Seiteninfo", "Rohdaten"), rows)
+        distinct = bool(pages[0]) and not set(pages[0]) & set(pages[1])
+        self.paging = f"i=0/i=1 überschneidungsfrei: {'ja' if distinct else 'nein'}; tiefe Seiten vollständig: {'ja' if all(results) else 'nein'}"
+        self.out.line(f"**{self.paging}**")
+        return "OK" if distinct and all(results) else "UNKLAR"
+
+    def step_result(self) -> str:
+        self.out.table(("Punkt", "Ergebnis"), [
+            ("Websuche als API-Abfrage", f"/v1/search?sortId={sort_id}&filterIds={filter_ids}: totalCount={self.total}"),
+            ("Barcode-Pfad", self.path or "nicht gefunden"), ("Blättern", self.paging),
+            ("Beispiel", next(((asset_id, values) for asset_id, values in self.barcodes.get(self.path, {}).items()), None))])
+        return "OK" if self.total and self.path else "UNKLAR"
+
+    def appendix(self) -> None:
+        self.out.section("Anhang: Aufrufe")
+        self.out.table(("#", "Pfad", "Parameter", "HTTP", "ms", "Rohdaten"),
+                       [(number, path, params, status, ms, file) for number, (path, params, status, ms, file) in enumerate(self.api.calls, 1)])
+
+    def run(self) -> Path:
+        steps = (("Suche mit Web-Filter", self.step_search), ("Barcode im Suchtreffer", self.step_hit_fields),
+                 ("Barcode über Clip-Abfragen", self.step_clip_fields), ("Barcode in Masse", self.step_bulk),
+                 ("Blättern", self.step_paging), ("Ergebnis", self.step_result))
+        for number, (title, step) in enumerate(steps, 1):
+            print(f"{number}/{len(steps)} {title} …", flush=True)
+            self.out.section(title)
+            try:
+                status = step()
+            except Skip as exc:
+                status = "ÜBERSPRUNGEN"
+                self.out.line(str(exc))
+            except Exception as exc:
+                status = "FEHLER"
+                self.out.line(f"Unerwarteter Fehler: {type(exc).__name__}: {exc}")
+                for line in ("~~~", *traceback.format_exc().splitlines(), "~~~"):
+                    self.out.line(line)
+            self.out.sections[-1]["status"] = status
+            print(f"    {status}")
+        self.appendix()
+        probe_dir.mkdir(exist_ok=True)
+        target = probe_dir / "report.md"
+        target.write_text(self.out.render(), encoding="utf-8")
+        return target
 
 
 # --------- MAIN ---------
 def main() -> None:
-    parser = argparse.ArgumentParser(description=f"{app_name} {app_version}: Veritone-Felder und -Filter klären (nur lesend).")
-    commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("check", help="Token prüfen (api_key-Parameter und Bearer-Header)").set_defaults(run=cmd_check)
-    commands.add_parser("filters", help="Filterbaum mit Namen, IDs und Anzahlen").set_defaults(run=cmd_filters)
-    sample = commands.add_parser("sample", help="Rohtreffer mit allen Feldpfaden anzeigen")
-    sample.add_argument("--query", default="", help="Suchtext (leer = alle)")
-    sample.add_argument("--count", type=int, default=3, help="Anzahl Treffer (max. 200)")
-    sample.add_argument("--show", type=int, default=1, help="Anzahl ausgegebener Treffer")
-    sample.set_defaults(run=cmd_sample)
-    find = commands.add_parser("find", help="Feldpfade finden, die einen bekannten Wert enthalten")
-    find.add_argument("value", help="z. B. ein 001 Identifier, 'Historiathek' oder 'Dokumentarfilm'")
-    find.add_argument("--query", help="abweichender Suchtext")
-    find.add_argument("--count", type=int, default=20)
-    find.add_argument("--contains", action="store_true", help="auch Teiltreffer anzeigen")
-    find.set_defaults(run=cmd_find)
-    formats = commands.add_parser("formats", help="Feldnamen gegen das Metadaten-Vokabular prüfen")
-    formats.add_argument("names", nargs="+")
-    formats.set_defaults(run=cmd_formats)
-    test = commands.add_parser("test", help="advancedSearch wie in Marathon testen (Seiten 0 und 1)")
-    test.add_argument("conditions", nargs="+", help="FELD=WERT, mehrere werden mit UND verknüpft")
-    test.add_argument("--op", default="Is", choices=("Is", "Contains", "In"))
-    test.add_argument("--page-size", type=int, default=2)
-    test.add_argument("--clip-field", help="internes Feld der Clip ID zum Anzeigen")
-    test.set_defaults(run=cmd_test)
-    commands.add_parser("collections", help="Veritone-Abfrage aller Kollektionen wie in Marathon (nur Anzahlen)").set_defaults(run=cmd_collections)
-    args = parser.parse_args()
-    args.run(args)
+    base_url, token = _load_settings()
+    print(f"{app_name} {app_version}: filterIds={filter_ids}, sortId={sort_id}")
+    print(f"Report: {Probe(Api(base_url, token), base_url).run()}")
 
 
 # --------- EXEC ---------

@@ -1,0 +1,2454 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/clip/60228265",
+    "params": null,
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "id": 60228265,
+    "family": "screener",
+    "ingested": "2025-07-15T12:56:16Z",
+    "liveDate": "2025-07-15T12:56:17Z",
+    "modified": "2026-09-21T12:27:04Z",
+    "name": "1RVF3C_JBCE3SSZRS",
+    "clipData": [
+      {
+        "id": 2843198458,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2026-09-21T12:27:05Z",
+        "name": "SI.Resource.Modified",
+        "value": "20260921122704"
+      },
+      {
+        "id": 2843198459,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:19Z",
+        "name": "Resource.Family",
+        "value": "screener"
+      },
+      {
+        "id": 2843198460,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Resource.Class",
+        "value": "Footage"
+      },
+      {
+        "id": 2843198461,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Audio.Notes",
+        "value": "Yes"
+      },
+      {
+        "id": 2843198462,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "DMH.Notes2",
+        "value": "781285"
+      },
+      {
+        "id": 2843198463,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Description",
+        "value": "1. Millionen Juden klagen an\\nDer \"Augenzeuge\" besuchte den größten Jüdischen Friedhof Deutschlands in Berlin-Weißensee und berichtet über den Auschwitz-Prozess in Frankfurt am Main (68 m)\\nkurz berichtet\\n2. Papst Paul VI. an den heiligen Stätten der Christenheit (Jordanien und Israel) (27 m)\\n3. Internationale Solidarität für Kuba (19 m)\\n4. Hochhausbau im Warschauer Stadtzentrum (19 m)\\n5. Wahl der Miss Katze in Rotterdam (26 m)\\nReportage\\n6. ... über den Betriebs- und Abstellbahnhof Berlin-Rummelsburg (55 m)\\nSport im Bild\\n7. Prag: Die Welt-Elite der Eiskunstläufer traf sich im Eispalast (33 m)\\n8. Oberhof: Dritte Serie der vier Sprunglauf-Qualifikations-Wettbewerbe für die Olympischen Winterspiele"
+      },
+      {
+        "id": 2843198464,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Description.DE",
+        "value": "1. Millionen Juden klagen an\\nDer \"Augenzeuge\" besuchte den größten Jüdischen Friedhof Deutschlands in Berlin-Weißensee und berichtet über den Auschwitz-Prozess in Frankfurt am Main (68 m)\\nkurz berichtet\\n2. Papst Paul VI. an den heiligen Stätten der Christenheit (Jordanien und Israel) (27 m)\\n3. Internationale Solidarität für Kuba (19 m)\\n4. Hochhausbau im Warschauer Stadtzentrum (19 m)\\n5. Wahl der Miss Katze in Rotterdam (26 m)\\nReportage\\n6. ... über den Betriebs- und Abstellbahnhof Berlin-Rummelsburg (55 m)\\nSport im Bild\\n7. Prag: Die Welt-Elite der Eiskunstläufer traf sich im Eispalast (33 m)\\n8. Oberhof: Dritte Serie der vier Sprunglauf-Qualifikations-Wettbewerbe für die Olympischen Winterspiele"
+      },
+      {
+        "id": 2843198465,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Description.Date",
+        "value": "1964"
+      },
+      {
+        "id": 2843198466,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Description.EN",
+        "value": "1. million Jews on trial\\nThe \"Eyewitness\" visited Germany's largest Jewish cemetery in Berlin-Weißensee and reports on the Auschwitz trial in Frankfurt am Main (68 m)\\nbriefly reported\\n2 Pope Paul VI at the holy places of Christianity (Jordan and Israel) (27 m)\\n3. international solidarity for Cuba (19 m)\\n4. high-rise construction in Warsaw city centre (19 m)\\n5. election of Miss Cat in Rotterdam (26 m)\\nReportage\\n6. ... about the Berlin-Rummelsburg depot (55 m)\\nSport in the picture\\n7. Prague: The world elite of figure skaters met in the Ice Palace (33 m)\\n8. Oberhof: Third series of the four ski jumping qualification competitions for the Winter Olympics"
+      },
+      {
+        "id": 2843198467,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Description.FR",
+        "value": "1. Accuser des millions de Juifs\\nLe \"témoin oculaire\" a visité le plus grand cimetière juif d'Allemagne à Berlin-Weißensee et rend compte du procès d'Auschwitz à Francfort-sur-le-Main (68 m)\\nbrièvement rapporté\\n2. le pape Paul VI sur les lieux saints de la chrétienté (Jordanie et Israël) (27 m)\\n3. solidarité internationale pour Cuba (19 m)\\n4. construction d'une tour dans le centre-ville de Varsovie (19 m)\\n5. élection de Miss Chat à Rotterdam (26 m)\\nReportage\\n6. ... sur la gare de service et de garage de Berlin-Rummelsburg (55 m)\\nLe sport en images\\n7. Prague : l'élite mondiale du patinage artistique s'est réunie au Palais des glaces (33 m)\\n8. Oberhof : troisième série des quatre épreuves de saut de qualification pour les Jeux olympiques d'hiver"
+      },
+      {
+        "id": 2843198468,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Keywords.DE",
+        "value": "Religion; Katholizismus; Papst; Judentum; Gericht; Baudenkmal; Jüdischer Friedhof; Kuba; Luftverkehr; Warschau; Hochhaus; Stadt; Katze; Schienenverkehr; Eiskunstlauf; Prag; Skispringen; Olympia"
+      },
+      {
+        "id": 2843198469,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Keywords.EN",
+        "value": "Religion; Catholicism; Pope; Judaism; Court; Monument; Jewish cemetery; Cuba; Air traffic; Warsaw; Skyscraper; City; Cat; Rail traffic; Figure skating; Prague; Ski jumping; Olympics"
+      },
+      {
+        "id": 2843198470,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Keywords.FR",
+        "value": "Catholicisme ; Cuba ; Catholicisme ; Cimetière juif ; Chat ; Juif ; Cour de justice ; Monument aux morts ; Varsovie ; Bâtiment ; Ville ; Transport ferroviaire ; Prague ; Saut à ski ; Jeux olympiques"
+      },
+      {
+        "id": 2843198471,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Accounting.ArticleRange",
+        "value": "P0001"
+      },
+      {
+        "id": 2843198472,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Accounting.License",
+        "value": "93044"
+      },
+      {
+        "id": 2843198473,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.AspectRatio",
+        "value": "1.9:1"
+      },
+      {
+        "id": 2843198474,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.AudioBitDepth",
+        "value": "24"
+      },
+      {
+        "id": 2843198475,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.AudioSampleRate",
+        "value": "48000"
+      },
+      {
+        "id": 2843198476,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.ClosedCaption",
+        "value": "No"
+      },
+      {
+        "id": 2843198477,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Codec",
+        "value": "DNxHR HQX 10bit"
+      },
+      {
+        "id": 2843198478,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Cognition.FaceRecognition",
+        "value": "No"
+      },
+      {
+        "id": 2843198479,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Cognition.SpeakerSeperation",
+        "value": "No"
+      },
+      {
+        "id": 2843198480,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Cognition.TextRecognition",
+        "value": "No"
+      },
+      {
+        "id": 2843198481,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.CountryOfOrigin.DE",
+        "value": "Deutsche Demokratische Republik (DDR)"
+      },
+      {
+        "id": 2843198482,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.CountryOfOrigin.EN",
+        "value": "Germany (East)"
+      },
+      {
+        "id": 2843198483,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.CountryOfOrigin.FR",
+        "value": "Allemagne (Est)"
+      },
+      {
+        "id": 2843198484,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.DEFA",
+        "value": "e6dbe764-c00a-ee11-8f6e-000d3aabc8c4"
+      },
+      {
+        "id": 2843198485,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Edit.Cleanfeed",
+        "value": "No"
+      },
+      {
+        "id": 2843198486,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Edit.Color",
+        "value": "No"
+      },
+      {
+        "id": 2843198487,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Edit.Digitized",
+        "value": "Yes"
+      },
+      {
+        "id": 2843198488,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Format",
+        "value": "Video"
+      },
+      {
+        "id": 2843198489,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Format.Digitized",
+        "value": "35mm"
+      },
+      {
+        "id": 2843198490,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Format.Original",
+        "value": "35mm"
+      },
+      {
+        "id": 2843198491,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.FrameRate",
+        "value": "24/1"
+      },
+      {
+        "id": 2843198492,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Genre.DE",
+        "value": "Wochenschau"
+      },
+      {
+        "id": 2843198493,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Genre.EN",
+        "value": "Newsreel"
+      },
+      {
+        "id": 2843198494,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Genre.FR",
+        "value": "Film d'actualité"
+      },
+      {
+        "id": 2843198495,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Language.Original.DE",
+        "value": "Deutsch"
+      },
+      {
+        "id": 2843198496,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Language.Original.EN",
+        "value": "German"
+      },
+      {
+        "id": 2843198497,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Language.Original.FR",
+        "value": "allemand"
+      },
+      {
+        "id": 2843198498,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Language.Subtitle",
+        "value": "No"
+      },
+      {
+        "id": 2843198499,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Narrator",
+        "value": "true"
+      },
+      {
+        "id": 2843198500,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Resolution",
+        "value": "4096x2160"
+      },
+      {
+        "id": 2843198501,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Shoot.Decade",
+        "value": "1960"
+      },
+      {
+        "id": 2843198502,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Shoot.Year",
+        "value": "1964"
+      },
+      {
+        "id": 2843198503,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Shotlist.DE",
+        "value": "1. Jüdischer Friedhof Berlin / Weißensee: Kameraschwenk über Gräber; verschiedene Grabsteine sind zu sehen; Denkmal für die im 1. Weltkrieg gefallenen jüdischen Soldaten; Mausoleum des Opernsängers Josef Schwarz; Verschieden Grabsteininschriften von im 2. Weltkrieg ermordeten Juden; Steinplatten mit denn Inschriften: Theresienstadt, Dachau, Auschwitz. Ein Büro; verschiedene Ordner im Aktenschrank mit den Aufschriften: Zyklon B, Gaskammern, Krematorien, Exekutionen; Frankfurt am Main. Mehrere Männer, die angeklagt sind im 3. Reich Juden ermordet zu haben, betreten nach einander den Gerichtssaal; Richter spricht\\n\\n\"Kurz berichtet\"\\n2. Papst Paul der VI besucht heilige Stätten des Christentums in Jordanien und Israel; er betet mit anderen Geistlichen zusammen; Telegramm vom Papst an Walter Ulbricht\\n\\n3. Kuba - Spendenpakete für die Opfer des Hurrikan Flora werden aus Flugzeug entladen\\n\\n4. Warschau - Bau neuer Wolkenkratzer im Stadtzentrum; Kameraschwenk über die Stadt\\n\\n5. Katzenschau in Rotterdam: Katzen werden von Jury begutachtet; verschiedene Tiere sind zu sehen\\n\\n\"Repotage\"\\n6. Berlin - Betriebs- und Abstellbahnhof Rummelsburg: Wagons werden gesäubert; Zug beim rangieren\\n\\n\"Sport im Bild\"\\n7. Prager Eispalast: Einlauf der Eiskunstläufer; Ein sowjetische bei ihrem Auftritt; die Weltmeister im Eistanz aus der CSSR Romanova / Roman auf dem Eis\\n\\n8. - 3. Serie der Qualifikation für den Skisprungwettbewerb bei Olympia; verschiedene Athleten bei ihren Sprüngen; Max Bolkart, Dieter Neuendorf, Happle, Georg Thoma, Karlheinz Munk und Dieter Bokeloh"
+      },
+      {
+        "id": 2843198504,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Shotlist.EN",
+        "value": "1. Jewish Cemetery Berlin / Weißensee: Camera panning over graves; various gravestones can be seen; Monument to the Jewish soldiers killed in World War I; Mausoleum of the opera singer Josef Schwarz; Various gravestone inscriptions of Jews murdered in World War II; Stone slabs with inscriptions: Theresienstadt, Dachau, Auschwitz. An office; various files in the filing cabinet with the inscriptions: Cyclone B, gas chambers, crematoria, executions; Frankfurt am Main. Several men accused of murdering Jews in the 3rd Reich enter the courtroom one by one; Judge speaks\\n\\n\"Briefly reported\"\\n2. pope Paul VI visits holy sites of Christianity in Jordan and Israel; he prays together with other clergy; telegram from pope to Walter Ulbricht\\n\\n3. Cuba - Donation packages for the victims of Hurricane Flora unloaded from aircraft\\n\\n4. Warsaw - construction of new skyscrapers in the city centre; camera panning over the city\\n\\n5. cat show in Rotterdam: Cats are judged by jury; different animals are to be seen\\n\\n\"Repotage\"\\n6. Berlin - Depot and parking station Rummelsburg: wagons cleaned; train shunting\\n\\n\"Sport in the picture\"\\n7. Prague Ice Palace: Ice skaters' arrival; a Soviet one at their performance; the world champions in ice dance from the CSSR Romanova / Roman on the Ice\\n\\n8. - 3rd series of qualification for the ski jumping competition at Olympia; different athletes during their jumps; Max Bolkart, Dieter Neuendorf, Happle, Georg Thoma, Karlheinz Munk und Dieter Bokeloh"
+      },
+      {
+        "id": 2843198505,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Shotlist.FR",
+        "value": "1. cimetière juif de Berlin / Weißensee : travelling sur des tombes ; on voit différentes pierres tombales ; monument aux soldats juifs morts pendant la Première Guerre mondiale ; mausolée du chanteur d'opéra Josef Schwarz ; différentes inscriptions sur des pierres tombales de juifs assassinés pendant la Seconde Guerre mondiale ; dalles de pierre avec des inscriptions : Theresienstadt, Dachau, Auschwitz. Un bureau ; divers classeurs dans une armoire à dossiers avec des inscriptions : Zyklon B, chambres à gaz, fours crématoires, exécutions ; Francfort-sur-le-Main. Plusieurs hommes accusés d'avoir assassiné des Juifs sous le 3e Reich entrent l'un après l'autre dans la salle d'audience ; le juge parle\\n\\n\"En bref\"\\n2. le pape Paul VI visite des lieux saints du christianisme en Jordanie et en Israël ; il prie avec d'autres ecclésiastiques ; télégramme du pape à Walter Ulbricht\\n\\n3. Cuba - des paquets de dons pour les victimes de l'ouragan Flora sont déchargés de l'avion.\\n\\n4. Varsovie - construction de nouveaux gratte-ciel dans le centre-ville ; travelling sur la ville\\n\\n5. exposition féline à Rotterdam : les chats sont examinés par un jury ; différents animaux sont présentés\\n\\n\"Repotage\"\\n6. Berlin - Gare d'exploitation et de stationnement de Rummelsburg : les wagons sont nettoyés ; train en manœuvre\\n\\n\"Le sport en images\"\\n7) Palais des glaces de Prague : Entrée des patineurs artistiques ; une patineuse soviétique en représentation ; les champions du monde de danse sur glace de la CSSR Romanova / Roman sur la glace.\\n\\n8e - 3e série de qualification pour le concours de saut à ski aux Jeux olympiques ; différents athlètes lors de leurs sauts ; Max Bolkart, Dieter Neuendorf, Happle, Georg Thoma, Karlheinz Munk et Dieter Bokeloh"
+      },
+      {
+        "id": 2843198506,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Studio.DE",
+        "value": "DEFA-Studio für Wochenschau und Dokumentarfilme"
+      },
+      {
+        "id": 2843198507,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Studio.EN",
+        "value": "DEFA studio for newsreel and documentary films"
+      },
+      {
+        "id": 2843198508,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Studio.FR",
+        "value": "DEFA-Studio für Wochenschau und Dokumentarfilme (Studio DEFA pour les actualités et les documentaires)"
+      },
+      {
+        "id": 2843198509,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Subtitle",
+        "value": "No"
+      },
+      {
+        "id": 2843198510,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Subtitle.Curated",
+        "value": "No"
+      },
+      {
+        "id": 2843198511,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Talent.Cast.Extras.DE",
+        "value": "Josef Schwarz"
+      },
+      {
+        "id": 2843198512,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Talent.Cast.Extras.EN",
+        "value": "Josef Schwarz"
+      },
+      {
+        "id": 2843198513,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Talent.Cast.Extras.FR",
+        "value": "Josef Schwarz"
+      },
+      {
+        "id": 2843198514,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Talent.Cast.Principals.DE",
+        "value": "Giovanni Battista Enrico Antonio Maria Montini (Papst Paul VI.)"
+      },
+      {
+        "id": 2843198515,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Talent.Cast.Principals.EN",
+        "value": "Giovanni Battista Enrico Antonio Maria Montini (Pope Paul VI)"
+      },
+      {
+        "id": 2843198516,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.Talent.Cast.Principals.FR",
+        "value": "Giovanni Battista Enrico Antonio Maria Montini (Pape Paul VI)"
+      },
+      {
+        "id": 2843198517,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Production.User.Id",
+        "value": "PROGRESS"
+      },
+      {
+        "id": 2843198518,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Rights.Agent",
+        "value": "DEFA"
+      },
+      {
+        "id": 2843198519,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Supplier.Barcode",
+        "value": "DEFA05341"
+      },
+      {
+        "id": 2843198520,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Supplier.Collection",
+        "value": "East German Newsreel \"Der Augenzeuge\""
+      },
+      {
+        "id": 2843198521,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Supplier.ParentClip",
+        "value": "Q6UJ9A0044FP"
+      },
+      {
+        "id": 2843198522,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Supplier.Rights",
+        "value": "Rights Managed"
+      },
+      {
+        "id": 2843198523,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Supplier.Source",
+        "value": "DEFA"
+      },
+      {
+        "id": 2843198524,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Supplier.Title",
+        "value": "Der Augenzeuge 1964/03"
+      },
+      {
+        "id": 2843198525,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Supplier.Uuid",
+        "value": "d4d88a2d-ca85-4fd1-9b59-dae60c065ccc"
+      },
+      {
+        "id": 2843198526,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "TE.OriginalName",
+        "value": "s3-vtn-progress-editshare-or-1.s3.amazonaws.com/DEFA05341__Der+Augenzeuge+1964-03.mp4"
+      },
+      {
+        "id": 2843198527,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Title",
+        "value": "Der Augenzeuge 1964/03"
+      },
+      {
+        "id": 2843198528,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Title.DE",
+        "value": "Der Augenzeuge 1964/03"
+      },
+      {
+        "id": 2843198529,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Title.EN",
+        "value": "Der Augenzeuge 1964/03"
+      },
+      {
+        "id": 2843198530,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Title.FR",
+        "value": "Der Augenzeuge 1964/03"
+      },
+      {
+        "id": 2843198531,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Transcription.Corrected",
+        "value": "No"
+      },
+      {
+        "id": 2843198532,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:16Z",
+        "name": "Transcription.EN",
+        "value": "No"
+      },
+      {
+        "id": 2843198533,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:44Z",
+        "name": "Workflow.Transcript.Status",
+        "value": "true"
+      },
+      {
+        "id": 2843198534,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "TE.DigitalFormat",
+        "value": "High Definition"
+      },
+      {
+        "id": 2843198535,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:17Z",
+        "name": "TE.Priority",
+        "value": "5"
+      },
+      {
+        "id": 2843198536,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2026-09-21T12:27:05Z",
+        "name": "TWK.State.History",
+        "value": "2025-07-15 12:56:17 progress-initial --(IsLicensable.DMH != \"true\")--&gt live;2025-07-15 12:56:17 progress-live.initial --(Resource.Family == \"tracking\" && !SI.Master.Filename)--&gt live.Install Place Holder Preview;2025-07-15 12:56:17 progress-live.Install Place Holder Preview --(!TWK.HasRenditions)--&gt live.Master Hold;2025-07-15 12:56:19 progress-live.Master Hold --(SI.Master.Filename)--&gt live.Ingest Hold;2025-07-15 12:58:23 progress-live.Ingest Hold --hold--&gt live.Preflight;2025-07-15 12:58:23 progress-live.Preflight.initial ----&gt live.Preflight.Ingest Notify;2025-07-15 12:58:23 progress-live.Preflight.Ingest Notify ----&gt live.Preflight.Data Sync;2025-07-15 12:58:23 progress-live.Preflight.Data Sync.initial ----&gt live.Preflight.Data Sync.Date Mapping;2025-07-15 12:58:23 progress-live.Preflight.Data Sync.Date Mapping.initial --(Production.FrameRate ~~ \"*/*\")--&gt live.Preflight.Data Sync.Date Mapping.FrameRate Regex;2025-07-15 12:58:23 progress-live.Preflight.Data Sync.Date Mapping.FrameRate Regex --(Production.FrameRate ~~ \"*/*\")--&gt live.Preflight.Data Sync.Date Mapping.final;2025-07-15 12:58:23 progress-live.Preflight.Data Sync.Date Mapping ----&gt live.Preflight.Data Sync.Original Language Mapping;2025-07-15 12:58:23 progress-live.Preflight.Data Sync.Original Language Mapping ----&gt live.Preflight.Data Sync.Set Language for Search Response;2025-07-15 12:58:23 progress-live.Preflight.Data Sync.Set Language for Search Response --(Production.Language.Original.EN)--&gt live.Preflight.Data Sync.Set Reproduction Rights;2025-07-15 12:58:23 progress-live.Preflight.Data Sync.Set Reproduction Rights --(SI.Master.S3.Bucket != \"s3-progress-packages-or-1\")--&gt live.Preflight.Data Sync.final;2025-07-15 12:58:23 progress-live.Preflight.Data Sync ----&gt live.Preflight.Rendition Sync;2025-07-15 12:58:23 progress-live.Preflight.Rendition Sync ----&gt live.Preflight.final;2025-07-15 12:58:23 progress-live.Preflight --final--&gt live.Rendition;2025-07-15 12:58:23 progress-live.Rendition.initial ----&gt live.Rendition.Auto;2025-07-15 12:58:23 progress-live.Rendition.Auto.initial ----&gt live.Rendition.Auto.Data;2025-07-15 12:58:23 progress-live.Rendition.Auto.Data.initial ----&gt live.Rendition.Auto.Data.Select;2025-07-15 12:58:23 progress-live.Rendition.Auto.Data.Select --(!Format.Duration || TWK.RegenRenditions ~~ \"*x*\")--&gt live.Rendition.Auto.Data.Request Data;2025-07-15 12:58:24 progress-live.Rendition.Auto.Data.Request Data --Transcode Success--&gt live.Rendition.Auto.Data.Wait;2025-07-15 12:58:57 progress-live.Rendition.Auto.Data.Wait --(Format.FrameSize && Format.Duration && !TWK.Transcode.*)--&gt live.Rendition.Auto.Data.final;2025-07-15 12:58:57 progress-live.Rendition.Auto.Data --final--&gt live.Rendition.Auto.Master;2025-07-15 12:58:57 progress-live.Rendition.Auto.Master.initial --(!MasterSource:Resource.Name)--&gt live.Rendition.Auto.Master.final;2025-07-15 12:58:57 progress-live.Rendition.Auto.Master --final--&gt live.Rendition.Auto.Mezzanine;2025-07-15 12:58:57 progress-live.Rendition.Auto.Mezzanine.initial ----&gt live.Rendition.Auto.Mezzanine.Mezzanine;2025-07-15 12:58:57 progress-live.Rendition.Auto.Mezzanine.Mezzanine ----&gt live.Rendition.Auto.Mezzanine.final;2025-07-15 12:58:57 progress-live.Rendition.Auto.Mezzanine --final--&gt live.Rendition.Auto.Previews;2025-07-15 12:58:57 progress-live.Rendition.Auto.Previews.initial ----&gt live.Rendition.Auto.Previews.Small Thumb;2025-07-15 12:58:57 progress-live.Rendition.Auto.Previews.Small Thumb --(TWK.CreateRenditions ~~ \"*,st,*\")--&gt live.Rendition.Auto.Previews.Small Thumb Request;2025-07-15 12:58:57 progress-live.Rendition.Auto.Previews.Small Thumb Request --Transcode Success--&gt live.Rendition.Auto.Previews.Speedview;2025-07-15 12:58:57 progress-live.Rendition.Auto.Previews.Speedview --(TWK.CreateRenditions ~~ \"*,sp,*\" && Format.Duration >= \"30000\")--&gt live.Rendition.Auto.Previews.Speedview Request;2025-07-15 12:58:57 progress-live.Rendition.Auto.Previews.Speedview Request --Transcode Success--&gt live.Rendition.Auto.Previews.Large Thumb;2025-07-15 12:58:57 progress-live.Rendition.Auto.Previews.Large Thumb --(TWK.CreateRenditions ~~ \"*lt*\")--&gt live.Rendition.Auto.Previews.Large Thumb Request;2025-07-15 12:58:57 progress-live.Rendition.Auto.Previews.Large Thumb Request --Transcode Success--&gt live.Rendition.Auto.Previews.Extra Large Thumb;2025-07-15 12:58:57 progress-live.Rendition.Auto.Previews.Extra Large Thumb --(TWK.CreateRenditions ~~ \"*xt*\")--&gt live.Rendition.Auto.Previews.Extra Large Thumb Request;2025-07-15 12:58:58 progress-live.Rendition.Auto.Previews.Extra Large Thumb Request --Transcode Success--&gt live.Rendition.Auto.Previews.Large Preview;2025-07-15 12:58:58 progress-live.Rendition.Auto.Previews.Large Preview --(TWK.CreateRenditions ~~ \"*lp*\")--&gt live.Rendition.Auto.Previews.Large Preview Request;2025-07-15 12:58:58 progress-live.Rendition.Auto.Previews.Large Preview Request --Transcode Success--&gt live.Rendition.Auto.Previews.WM Large Preview;2025-07-15 12:58:58 progress-live.Rendition.Auto.Previews.WM Large Preview --(TWK.CreateRenditions ~~ \"*lp*\")--&gt live.Rendition.Auto.Previews.WM Large Preview Request;2025-07-15 12:58:58 progress-live.Rendition.Auto.Previews.WM Large Preview Request --Transcode Success--&gt live.Rendition.Auto.Previews.Clean Extra Large Preview;2025-07-15 12:58:58 progress-live.Rendition.Auto.Previews.Clean Extra Large Preview --(TWK.CreateRenditions ~~ \"*xp*\")--&gt live.Rendition.Auto.Previews.Clean XP Request;2025-07-15 12:58:58 progress-live.Rendition.Auto.Previews.Clean XP Request --Transcode Success--&gt live.Rendition.Auto.Previews.Clean 30s Extra Large Preview;2025-07-15 12:58:58 progress-live.Rendition.Auto.Previews.Clean 30s Extra Large Preview --(TWK.CreateRenditions ~~ \"*xp*\")--&gt live.Rendition.Auto.Previews.Clean 30s XP Request;2025-07-15 12:58:58 progress-live.Rendition.Auto.Previews.Clean 30s XP Request --Transcode Success--&gt live.Rendition.Auto.Previews.High Rate Preview;2025-07-15 12:58:58 progress-live.Rendition.Auto.Previews.High Rate Preview ----&gt live.Rendition.Auto.Previews.final;2025-07-15 12:58:58 progress-live.Rendition.Auto.Previews --final--&gt live.Rendition.Auto.Comps;2025-07-15 12:58:58 progress-live.Rendition.Auto.Comps.initial ----&gt live.Rendition.Auto.Comps.Wazee Comp;2025-07-15 12:58:58 progress-live.Rendition.Auto.Comps.Wazee Comp --(TWK.CreateRenditions ~~ \"*mc*\")--&gt live.Rendition.Auto.Comps.Wazee Comp Request;2025-07-15 12:58:58 progress-live.Rendition.Auto.Comps.Wazee Comp Request --Transcode Success--&gt live.Rendition.Auto.Comps.final;2025-07-15 12:58:58 progress-live.Rendition.Auto.Comps --final--&gt live.Rendition.Auto.Wait;2025-07-15 13:14:05 progress-live.Rendition.Auto.Wait --(!TWK.Transcode.*)--&gt live.Rendition.Auto.Complete;2025-07-15 13:14:05 progress-live.Rendition.Auto.Complete ----&gt live.Rendition.Auto.final;2025-07-15 13:14:05 progress-live.Rendition.Auto --final--&gt live.Rendition.final;2025-07-15 13:14:05 progress-live.Rendition --final--&gt live.Cognition V3;2025-07-15 13:14:05 progress-live.Cognition V3.initial --(Resource.Family == [\"screener\",\"website\"])--&gt live.Cognition V3.Cognate Sync;2025-07-15 13:14:05 progress-live.Cognition V3.Cognate Sync ----&gt live.Cognition V3.final;2025-07-15 13:14:05 progress-live.Cognition V3 --final--&gt live.Postflight;2025-07-15 13:14:05 progress-live.Postflight.initial ----&gt live.Postflight.Transcript Copy;2025-07-15 13:14:05 progress-live.Postflight.Transcript Copy ----&gt live.Postflight.Timeline Copy;2025-07-15 13:14:05 progress-live.Postflight.Timeline Copy ----&gt live.Postflight.Update;2025-07-15 13:14:05 progress-live.Postflight.Update --(TWK.HasRenditions)--&gt live.Postflight.Notify Live;2025-07-15 13:14:05 progress-live.Postflight.Notify Live --(!IsLicensable.DMH)--&gt live.Postflight.final;2025-07-15 13:14:05 progress-live.Postflight --final--&gt live.final;2025-07-15 13:14:05 progress-live --final--&gt final;2025-07-15 13:14:48 progress-initial --(IsLicensable.DMH == \"true\" && Resource.SiteAccess !~ \"dmh\" && Resource.SiteAccess !~ \"progress\")--&gt live;2025-07-15 13:14:48 progress-live.initial --(TWK.Hold)--&gt live.Preflight;2025-07-15 13:14:48 progress-live.Preflight.initial ----&gt live.Preflight.Ingest Notify;2025-07-15 13:14:48 progress-live.Preflight.Ingest Notify ----&gt live.Preflight.Data Sync;2025-07-15 13:14:48 progress-live.Preflight.Data Sync.initial --(TWK.DataSync)--&gt live.Preflight.Data Sync.final;2025-07-15 13:14:48 progress-live.Preflight.Data Sync --(TWK.DataSync)--&gt live.Preflight.Rendition Sync;2025-07-15 13:14:48 progress-live.Preflight.Rendition Sync ----&gt live.Preflight.final;2025-07-15 13:14:48 progress-live.Preflight --final--&gt live.Rendition;2025-07-15 13:14:48 progress-live.Rendition.initial ----&gt live.Rendition.Auto;2025-07-15 13:14:48 progress-live.Rendition.Auto.initial --(TWK.HasRenditions && !TWK.RegenRenditions)--&gt live.Rendition.Auto.final;2025-07-15 13:14:48 progress-live.Rendition.Auto --final--&gt live.Rendition.final;2025-07-15 13:14:48 progress-live.Rendition --final--&gt live.Cognition V3;2025-07-15 13:14:48 progress-live.Cognition V3.initial --(Resource.Family == [\"screener\",\"website\"])--&gt live.Cognition V3.Cognate Sync;2025-07-15 13:14:48 progress-live.Cognition V3.Cognate Sync ----&gt live.Cognition V3.final;2025-07-15 13:14:48 progress-live.Cognition V3 --final--&gt live.Postflight;2025-07-15 13:14:48 progress-live.Postflight.initial ----&gt live.Postflight.Transcript Copy;2025-07-15 13:14:48 progress-live.Postflight.Transcript Copy ----&gt live.Postflight.Timeline Copy;2025-07-15 13:14:48 progress-live.Postflight.Timeline Copy ----&gt live.Postflight.Update;2025-07-15 13:14:48 progress-live.Postflight.Update --(TWK.HasRenditions)--&gt live.Postflight.Notify Live;2025-07-15 13:14:48 progress-live.Postflight.Notify Live ----&gt live.Postflight.final;2025-07-15 13:14:48 progress-live.Postflight --final--&gt live.final;2025-07-15 13:14:48 progress-live --final--&gt final;2025-07-16 11:30:43 progress-initial --(IsLicensable.DMH == \"true\" && Resource.SiteAccess !~ \"dmh\" && Resource.SiteAccess !~ \"progress\")--&gt live;2025-07-16 11:30:43 progress-live.initial --(TWK.Hold)--&gt live.Preflight;2025-07-16 11:30:43 progress-live.Preflight.initial ----&gt live.Preflight.Ingest Notify;2025-07-16 11:30:43 progress-live.Preflight.Ingest Notify ----&gt live.Preflight.Data Sync;2025-07-16 11:30:43 progress-live.Preflight.Data Sync.initial --(TWK.DataSync)--&gt live.Preflight.Data Sync.final;2025-07-16 11:30:43 progress-live.Preflight.Data Sync --(TWK.DataSync)--&gt live.Preflight.Rendition Sync;2025-07-16 11:30:43 progress-live.Preflight.Rendition Sync ----&gt live.Preflight.final;2025-07-16 11:30:43 progress-live.Preflight --final--&gt live.Rendition;2025-07-16 11:30:43 progress-live.Rendition.initial ----&gt live.Rendition.Auto;2025-07-16 11:30:43 progress-live.Rendition.Auto.initial --(TWK.HasRenditions && !TWK.RegenRenditions)--&gt live.Rendition.Auto.final;2025-07-16 11:30:43 progress-live.Rendition.Auto --final--&gt live.Rendition.final;2025-07-16 11:30:43 progress-live.Rendition --final--&gt live.Cognition V3;2025-07-16 11:30:43 progress-live.Cognition V3.initial --(Resource.Family == [\"screener\",\"website\"])--&gt live.Cognition V3.Cognate Sync;2025-07-16 11:30:43 progress-live.Cognition V3.Cognate Sync --(Workflow.Transcript.Status == \"true\")--&gt live.Cognition V3.Create TDO;2025-07-16 11:30:43 progress-live.Cognition V3.Create TDO.initial ----&gt live.Cognition V3.Create TDO.Wait;2025-07-16 11:30:58 progress-live.Cognition V3.Create TDO.Wait --(AiWare.TDO.Id)--&gt live.Cognition V3.Create TDO.final;2025-07-16 11:30:58 progress-live.Cognition V3.Create TDO --final--&gt live.Cognition V3.Cognate;2025-07-16 11:30:58 progress-live.Cognition V3.Cognate.initial ----&gt live.Cognition V3.Cognate.Start DAG Job;2025-07-16 11:30:58 progress-live.Cognition V3.Cognate.Start DAG Job ----&gt live.Cognition V3.Cognate.Azure Object Recognition Task;2025-07-16 11:30:58 progress-live.Cognition V3.Cognate.Azure Object Recognition Task ----&gt live.Cognition V3.Cognate.Object Recognition Task;2025-07-16 11:30:58 progress-live.Cognition V3.Cognate.Object Recognition Task ----&gt live.Cognition V3.Cognate.Logo Detection Task;2025-07-16 11:30:58 progress-live.Cognition V3.Cognate.Logo Detection Task ----&gt live.Cognition V3.Cognate.OCR Task;2025-07-16 11:30:58 progress-live.Cognition V3.Cognate.OCR Task ----&gt live.Cognition V3.Cognate.Scene Detection Task;2025-07-16 11:30:58 progress-live.Cognition V3.Cognate.Scene Detection Task ----&gt live.Cognition V3.Cognate.Transcription Task;2025-07-16 11:30:58 progress-live.Cognition V3.Cognate.Transcription Task --(Workflow.Transcript.Status == \"true\")--&gt live.Cognition V3.Cognate.Run Transcription Task;2025-07-16 11:30:58 progress-live.Cognition V3.Cognate.Run Transcription Task --(Production.Language.Original.EN == \"German\")--&gt live.Cognition V3.Cognate.Facial Detection Task;2025-07-16 11:30:58 progress-live.Cognition V3.Cognate.Facial Detection Task ----&gt live.Cognition V3.Cognate.Submit DAG Job;2025-07-16 11:30:58 progress-live.Cognition V3.Cognate.Submit DAG Job ----&gt live.Cognition V3.Cognate.Wait;2025-07-16 11:30:58 progress-live.Cognition V3.Cognate.Wait.initial ----&gt live.Cognition V3.Cognate.Wait.Start;2025-07-16 11:31:02 progress-live.Cognition V3.Cognate.Wait.Start --(TWK.AiWare.Job.Id.*)--&gt live.Cognition V3.Cognate.Wait.Finish;2025-07-16 11:35:21 progress-live.Cognition V3.Cognate.Wait.Finish --(!TWK.AiWare.Job.Id.*)--&gt live.Cognition V3.Cognate.Wait.final;2025-07-16 11:35:38 progress-live.Cognition V3.Cognate.Wait --final--&gt live.Cognition V3.Cognate.final;2025-07-16 11:35:38 progress-live.Cognition V3.Cognate --final--&gt live.Cognition V3.Notify;2025-07-16 11:35:38 progress-live.Cognition V3.Notify ----&gt live.Cognition V3.final;2025-07-16 11:35:38 progress-live.Cognition V3 --final--&gt live.Postflight;2025-07-16 11:35:38 progress-live.Postflight.initial ----&gt live.Postflight.Transcript Copy;2025-07-16 11:35:38 progress-live.Postflight.Transcript Copy ----&gt live.Postflight.Timeline Copy;2025-07-16 11:35:38 progress-live.Postflight.Timeline Copy ----&gt live.Postflight.Update;2025-07-16 11:35:38 progress-live.Postflight.Update --(TWK.HasRenditions)--&gt live.Postflight.Notify Live;2025-07-16 11:35:38 progress-live.Postflight.Notify Live ----&gt live.Postflight.final;2025-07-16 11:35:38 progress-live.Postflight --final--&gt live.final;2025-07-16 11:35:38 progress-live --final--&gt final;2026-09-21 12:27:04 progress-initial --(IsLicensable.DMH == \"true\" && Resource.SiteAccess !~ \"dmh\" && Resource.SiteAccess !~ \"progress\")--&gt live;2026-09-21 12:27:04 progress-live.initial --(TWK.Hold)--&gt live.Preflight;2026-09-21 12:27:04 progress-live.Preflight.initial ----&gt live.Preflight.Ingest Notify;2026-09-21 12:27:04 progress-live.Preflight.Ingest Notify ----&gt live.Preflight.Data Sync;2026-09-21 12:27:04 progress-live.Preflight.Data Sync.initial ----&gt live.Preflight.Data Sync.Date Mapping;2026-09-21 12:27:04 progress-live.Preflight.Data Sync.Date Mapping.initial --(Production.FrameRate ~~ \"*/*\")--&gt live.Preflight.Data Sync.Date Mapping.FrameRate Regex;2026-09-21 12:27:04 progress-live.Preflight.Data Sync.Date Mapping.FrameRate Regex --(Production.FrameRate ~~ \"*/*\")--&gt live.Preflight.Data Sync.Date Mapping.final;2026-09-21 12:27:04 progress-live.Preflight.Data Sync.Date Mapping ----&gt live.Preflight.Data Sync.Original Language Mapping;2026-09-21 12:27:04 progress-live.Preflight.Data Sync.Original Language Mapping ----&gt live.Preflight.Data Sync.Set Language for Search Response;2026-09-21 12:27:04 progress-live.Preflight.Data Sync.Set Language for Search Response --(Production.Language.Original.EN)--&gt live.Preflight.Data Sync.Set Reproduction Rights;2026-09-21 12:27:04 progress-live.Preflight.Data Sync.Set Reproduction Rights --(SI.Master.S3.Bucket != \"s3-progress-packages-or-1\")--&gt live.Preflight.Data Sync.final;2026-09-21 12:27:04 progress-live.Preflight.Data Sync --(TWK.DataSync)--&gt live.Preflight.Rendition Sync;2026-09-21 12:27:04 progress-live.Preflight.Rendition Sync ----&gt live.Preflight.final;2026-09-21 12:27:04 progress-live.Preflight --final--&gt live.Rendition;2026-09-21 12:27:04 progress-live.Rendition.initial ----&gt live.Rendition.Auto;2026-09-21 12:27:04 progress-live.Rendition.Auto.initial --(TWK.HasRenditions && !TWK.RegenRenditions)--&gt live.Rendition.Auto.final;2026-09-21 12:27:04 progress-live.Rendition.Auto --final--&gt live.Rendition.final;2026-09-21 12:27:04 progress-live.Rendition --final--&gt live.Cognition V3;2026-09-21 12:27:04 progress-live.Cognition V3.initial --(Resource.Family == [\"screener\",\"website\"])--&gt live.Cognition V3.Cognate Sync;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate Sync --(TWK.Cognate.Category)--&gt live.Cognition V3.Create TDO;2026-09-21 12:27:04 progress-live.Cognition V3.Create TDO.initial --(AiWare.TDO.Id)--&gt live.Cognition V3.Create TDO.final;2026-09-21 12:27:04 progress-live.Cognition V3.Create TDO --final--&gt live.Cognition V3.Cognate;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate.initial ----&gt live.Cognition V3.Cognate.Start DAG Job;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate.Start DAG Job ----&gt live.Cognition V3.Cognate.Azure Object Recognition Task;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate.Azure Object Recognition Task ----&gt live.Cognition V3.Cognate.Object Recognition Task;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate.Object Recognition Task ----&gt live.Cognition V3.Cognate.Logo Detection Task;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate.Logo Detection Task ----&gt live.Cognition V3.Cognate.OCR Task;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate.OCR Task ----&gt live.Cognition V3.Cognate.Scene Detection Task;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate.Scene Detection Task ----&gt live.Cognition V3.Cognate.Transcription Task;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate.Transcription Task --(Workflow.Transcript.Status == \"true\")--&gt live.Cognition V3.Cognate.Run Transcription Task;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate.Run Transcription Task --(AiWare.Transcription.Timeline)--&gt live.Cognition V3.Cognate.Facial Detection Task;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate.Facial Detection Task ----&gt live.Cognition V3.Cognate.Submit DAG Job;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate.Submit DAG Job ----&gt live.Cognition V3.Cognate.Wait;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate.Wait.initial ----&gt live.Cognition V3.Cognate.Wait.Start;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate.Wait.Start --(!TWK.AiWare.Job.Queued)--&gt live.Cognition V3.Cognate.Wait.final;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate.Wait --final--&gt live.Cognition V3.Cognate.final;2026-09-21 12:27:04 progress-live.Cognition V3.Cognate --final--&gt live.Cognition V3.Notify;2026-09-21 12:27:04 progress-live.Cognition V3.Notify ----&gt live.Cognition V3.final;2026-09-21 12:27:04 progress-live.Cognition V3 --final--&gt live.Postflight;2026-09-21 12:27:04 progress-live.Postflight.initial ----&gt live.Postflight.Transcript Copy;2026-09-21 12:27:04 progress-live.Postflight.Transcript Copy ----&gt live.Postflight.Timeline Copy;2026-09-21 12:27:04 progress-live.Postflight.Timeline Copy ----&gt live.Postflight.Update;2026-09-21 12:27:04 progress-live.Postflight.Update --(TWK.HasRenditions)--&gt live.Postflight.Notify Live;2026-09-21 12:27:04 progress-live.Postflight.Notify Live ----&gt live.Postflight.VDM Check;2026-09-21 12:27:04 progress-live.Postflight.VDM Check ----&gt live.Postflight.final;2026-09-21 12:27:04 progress-live.Postflight --final--&gt live.final;2026-09-21 12:27:04 progress-live --final--&gt final"
+      },
+      {
+        "id": 2843198538,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "TE.LiveDate",
+        "value": "2025-07-15 12:56:17"
+      },
+      {
+        "id": 2843198539,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Resource.Descriptor",
+        "value": "clip_60228265"
+      },
+      {
+        "id": 2843198540,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Resource.DatabaseId",
+        "value": "60228265"
+      },
+      {
+        "id": 2843198541,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Resource.Name",
+        "value": "1RVF3C_JBCE3SSZRS"
+      },
+      {
+        "id": 2843198542,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:19Z",
+        "name": "SI.Resource.Family",
+        "value": "screener"
+      },
+      {
+        "id": 2843198543,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Resource.Created",
+        "value": "20250715125616"
+      },
+      {
+        "id": 2843198545,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Resource.Type",
+        "value": "clip"
+      },
+      {
+        "id": 2843198546,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Description",
+        "value": "1. Millionen Juden klagen an\\nDer \"Augenzeuge\" besuchte den größten Jüdischen Friedhof Deutschlands in Berlin-Weißensee und berichtet über den Auschwitz-Prozess in Frankfurt am Main (68 m)\\nkurz berichtet\\n2. Papst Paul VI. an den heiligen Stätten der Christenheit (Jordanien und Israel) (27 m)\\n3. Internationale Solidarität für Kuba (19 m)\\n4. Hochhausbau im Warschauer Stadtzentrum (19 m)\\n5. Wahl der Miss Katze in Rotterdam (26 m)\\nReportage\\n6. ... über den Betriebs- und Abstellbahnhof Berlin-Rummelsburg (55 m)\\nSport im Bild\\n7. Prag: Die Welt-Elite der Eiskunstläufer traf sich im Eispalast (33 m)\\n8. Oberhof: Dritte Serie der vier Sprunglauf-Qualifikations-Wettbewerbe für die Olympischen Winterspiele"
+      },
+      {
+        "id": 2843198547,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Title",
+        "value": "Der Augenzeuge 1964/03"
+      },
+      {
+        "id": 2843198548,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Owner",
+        "value": "Progress"
+      },
+      {
+        "id": 2843198549,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Supplier.Tier",
+        "value": "5"
+      },
+      {
+        "id": 2843198550,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Supplier.SearchRank.Wazee",
+        "value": "5"
+      },
+      {
+        "id": 2843198551,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Supplier.CategoryType",
+        "value": "Platform"
+      },
+      {
+        "id": 2843198552,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Supplier.ContentCategory",
+        "value": "Studio"
+      },
+      {
+        "id": 2843198553,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T13:14:05Z",
+        "name": "SI.Renditions",
+        "value": "DerAugenzeuge196403mp4 lpf4v lpwmpgovtcf4v ltjpg mcwmpgovtcmp4 mpf4v spwmpgf4v stjpg xpf4v xtjpg"
+      },
+      {
+        "id": 2843198554,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:19Z",
+        "name": "SI.Original.Names",
+        "value": "s3-vtn-progress-editshare-or-1.s3.amazonaws.com/DEFA05341__Der+Augenzeuge+1964-03.mp4 DEFA05341__Der+Augenzeuge+1964-03.mp4"
+      },
+      {
+        "id": 2843198555,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Property.Name",
+        "value": "1RVF3C_JBCE3SSZRS"
+      },
+      {
+        "id": 2843198556,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Property.Score",
+        "value": "000"
+      },
+      {
+        "id": 2843198557,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.LicensableNow",
+        "value": "false"
+      },
+      {
+        "id": 2843198558,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Media.Physical",
+        "value": "None"
+      },
+      {
+        "id": 2843198559,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Rights.Talent",
+        "value": "Release Not On File"
+      },
+      {
+        "id": 2843198560,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Rights.Trademark",
+        "value": "Release Not On File"
+      },
+      {
+        "id": 2843198561,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Rights.Music",
+        "value": "Release Not On File"
+      },
+      {
+        "id": 2843198562,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Rights.SoundFx",
+        "value": "Release Not On File"
+      },
+      {
+        "id": 2843198563,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Rights.Voice",
+        "value": "Release Not On File"
+      },
+      {
+        "id": 2843198564,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Rights.Location",
+        "value": "Release Not On File"
+      },
+      {
+        "id": 2843198565,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Price.Class",
+        "value": "D"
+      },
+      {
+        "id": 2843198566,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Resource.Grade",
+        "value": "3"
+      },
+      {
+        "id": 2843198567,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Thesauri",
+        "value": "supprogress wazeenet"
+      },
+      {
+        "id": 2843198568,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.SearchRank.Shuffle",
+        "value": "38c3225b954e150f9ab72f7268b05076"
+      },
+      {
+        "id": 2843198569,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:19Z",
+        "name": "SI.Supplier.Reference",
+        "value": "s3-vtn-progress-editshare-or-1.s3.amazonaws.com/DEFA05341__Der+Augenzeuge+1964-03.mp4 DEFA05341__Der+Augenzeuge+1964-03.mp4"
+      },
+      {
+        "id": 2843198570,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T13:14:48Z",
+        "name": "SI.InWorkflow",
+        "value": "true"
+      },
+      {
+        "id": 2843198571,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.IsHidden",
+        "value": "false"
+      },
+      {
+        "id": 2843198572,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T13:14:48Z",
+        "name": "SI.LicensableIn",
+        "value": "nowhere"
+      },
+      {
+        "id": 2843198573,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Channels.Public",
+        "value": "nowhere"
+      },
+      {
+        "id": 2843198574,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Channels.Protected",
+        "value": "nowhere"
+      },
+      {
+        "id": 2843198575,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T13:14:48Z",
+        "name": "SI.Channels.Private",
+        "value": "nowhere"
+      },
+      {
+        "id": 2843198576,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Created.Timestamp",
+        "value": "20250715125616"
+      },
+      {
+        "id": 2843198577,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:19Z",
+        "name": "SI.Resource.Family.SortIndex",
+        "value": "2"
+      },
+      {
+        "id": 2843198578,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:18Z",
+        "name": "SI.Description.Date",
+        "value": "19640101000000"
+      },
+      {
+        "id": 2843198581,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:19Z",
+        "name": "SI.Master.Type",
+        "value": "S3ViaS3Signed"
+      },
+      {
+        "id": 2843198582,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:19Z",
+        "name": "SI.Master.Cdn",
+        "value": "s3"
+      },
+      {
+        "id": 2843198583,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:19Z",
+        "name": "SI.Master.S3.Bucket",
+        "value": "s3-vtn-progress-editshare-or-1"
+      },
+      {
+        "id": 2843198584,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:19Z",
+        "name": "SI.Master.S3.Key",
+        "value": "DEFA05341__Der Augenzeuge 1964-03.mp4"
+      },
+      {
+        "id": 2843198585,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:19Z",
+        "name": "SI.Master.Location",
+        "value": "81b908cf-4aa4-4a4c-954d-70dbf3a69baa"
+      },
+      {
+        "id": 2843198586,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:19Z",
+        "name": "SI.Master.Filename",
+        "value": "DEFA05341__Der Augenzeuge 1964-03.mp4"
+      },
+      {
+        "id": 2843198587,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:19Z",
+        "name": "SI.Master.Extension",
+        "value": "mp4"
+      },
+      {
+        "id": 2843198588,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:19Z",
+        "name": "SI.Master.FileSize",
+        "value": "110932480"
+      },
+      {
+        "id": 2843198589,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:56:19Z",
+        "name": "SI.Master.SourceReference",
+        "value": "2025-07-15 12:55:12"
+      },
+      {
+        "id": 2843198845,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:24Z",
+        "name": "TWK.Hold",
+        "value": "true"
+      },
+      {
+        "id": 2843198846,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:24Z",
+        "name": "Topic.Discovery",
+        "value": "German"
+      },
+      {
+        "id": 2843198847,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:24Z",
+        "name": "Rights.Reproduction",
+        "value": "Rights Managed"
+      },
+      {
+        "id": 2843198848,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:24Z",
+        "name": "TWK.DataSync",
+        "value": "true"
+      },
+      {
+        "id": 2843198849,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:24Z",
+        "name": "TWK.CreateRenditions",
+        "value": ",lp,lt,st,sp,mc,xp,xt,"
+      },
+      {
+        "id": 2843198855,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.BroadcastStandard",
+        "value": "2K"
+      },
+      {
+        "id": 2843198856,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.Audio.Codec",
+        "value": "aac"
+      },
+      {
+        "id": 2843198857,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.ScanType",
+        "value": "Progressive"
+      },
+      {
+        "id": 2843198858,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.ImageDataRate",
+        "value": "1.20 Mbps"
+      },
+      {
+        "id": 2843198859,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.ChromaFormat",
+        "value": "4:2:0"
+      },
+      {
+        "id": 2843198860,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.Video.Level",
+        "value": "51"
+      },
+      {
+        "id": 2843198861,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.Video.Profile",
+        "value": "Main"
+      },
+      {
+        "id": 2843198862,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.QuickTime.Parser",
+        "value": "ffprobe"
+      },
+      {
+        "id": 2843198863,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.FrameRate",
+        "value": "24 fps"
+      },
+      {
+        "id": 2843198864,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.Duration",
+        "value": "639625"
+      },
+      {
+        "id": 2843198865,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.FileSize",
+        "value": "105 MB"
+      },
+      {
+        "id": 2843198866,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.TimecodeTrack.DropFrame",
+        "value": "false"
+      },
+      {
+        "id": 2843198867,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.ColorModel",
+        "value": "bt709"
+      },
+      {
+        "id": 2843198868,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.AspectRatio",
+        "value": "16:9"
+      },
+      {
+        "id": 2843198869,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.AudioDataRate",
+        "value": "128 Kbps"
+      },
+      {
+        "id": 2843198870,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.QuickTime.Codec",
+        "value": "avc1"
+      },
+      {
+        "id": 2843198871,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.ScanType.ContainsInterlaced",
+        "value": "false"
+      },
+      {
+        "id": 2843198872,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.MasterStandard",
+        "value": "MP4"
+      },
+      {
+        "id": 2843198873,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.ImageChannelConfiguration",
+        "value": "1"
+      },
+      {
+        "id": 2843198874,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.FieldOrder",
+        "value": "Progressive"
+      },
+      {
+        "id": 2843198875,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.AudioSamplingRate",
+        "value": "48.0 KHz"
+      },
+      {
+        "id": 2843198876,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.FrameRateVariable",
+        "value": "false"
+      },
+      {
+        "id": 2843198877,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.TimecodeTrack.Present",
+        "value": "true"
+      },
+      {
+        "id": 2843198878,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.TimeStart",
+        "value": "01:00:00:00"
+      },
+      {
+        "id": 2843198879,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.AudioChannelConfiguration",
+        "value": "2"
+      },
+      {
+        "id": 2843198880,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.BitDepth",
+        "value": "8 bit"
+      },
+      {
+        "id": 2843198881,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.FrameSize",
+        "value": "2048 x 1080"
+      },
+      {
+        "id": 2843198882,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.TimeEnd",
+        "value": "01:10:39:14"
+      },
+      {
+        "id": 2843198883,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "TE.IsUpdate",
+        "value": "true"
+      },
+      {
+        "id": 2843198884,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "Format.ScanType.Detail",
+        "value": "idet frames: 250, tff: 0, bff: 0, prog: 249, undet: 1"
+      },
+      {
+        "id": 2843198885,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "SI.Format.Duration",
+        "value": "0000639625"
+      },
+      {
+        "id": 2843198886,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "SI.Format.FrameSizeRatio",
+        "value": "0000018963"
+      },
+      {
+        "id": 2843198887,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:57Z",
+        "name": "SI.Format.FrameRate",
+        "value": "0000240000"
+      },
+      {
+        "id": 2843198889,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:58Z",
+        "name": "Format.SpeedviewStart",
+        "value": "00:00:00:00"
+      },
+      {
+        "id": 2843198890,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T12:58:58Z",
+        "name": "Format.SpeedviewEnd",
+        "value": "00:00:30:00"
+      },
+      {
+        "id": 2843198959,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T13:14:48Z",
+        "name": "TWK.Workflow.Evaluate",
+        "value": "nudge ca7eedbd-36c9-417c-beaf-86f04b030dea"
+      },
+      {
+        "id": 2843200168,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T13:14:05Z",
+        "name": "TWK.HasRenditions",
+        "value": "Automatic screener 2025-07-15 13:14:05"
+      },
+      {
+        "id": 2843200169,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T13:14:05Z",
+        "name": "Commerce.Rendition",
+        "value": "Automatic screener 2025-07-15 13:14:05"
+      },
+      {
+        "id": 2843200170,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T13:14:05Z",
+        "name": "IsLicensable.DMH",
+        "value": "true"
+      },
+      {
+        "id": 2843200171,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T13:14:05Z",
+        "name": "TWK.IsLicensable.DMH",
+        "value": "true"
+      },
+      {
+        "id": 2843200174,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T13:14:48Z",
+        "name": "Resource.SiteAccess",
+        "value": "dmh_public"
+      },
+      {
+        "id": 2843200210,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2026-09-21T12:27:05Z",
+        "name": "TWK.PurchaseBlock",
+        "value": "2026-09-21 12:27:04"
+      },
+      {
+        "id": 2843200211,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2026-09-21T12:27:05Z",
+        "name": "TWK.SearchBlock",
+        "value": "2026-09-21 12:27:04"
+      },
+      {
+        "id": 2843200212,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-15T13:14:48Z",
+        "name": "TE.ZombieDate",
+        "value": "2025-07-15 13:14:48"
+      },
+      {
+        "id": 2843621656,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:44Z",
+        "name": "TWK.Cognate.Category",
+        "value": "transcription"
+      },
+      {
+        "id": 2843621756,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.48",
+        "value": "[INF] Production.Studio.DE: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621757,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.49",
+        "value": "[INF] Production.Studio.EN: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621758,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.46",
+        "value": "[INF] Production.Shotlist.EN: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621759,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.47",
+        "value": "[INF] Production.Shotlist.FR: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621760,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.11",
+        "value": "[INF] Keywords.FR: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621761,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.55",
+        "value": "[INF] Production.Talent.Cast.Extras.FR: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621762,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.12",
+        "value": "[INF] Owner: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621763,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.56",
+        "value": "[INF] Production.Talent.Cast.Principals.DE: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621764,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.53",
+        "value": "[INF] Production.Talent.Cast.Extras.DE: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621765,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.10",
+        "value": "[INF] Keywords.EN: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621766,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.54",
+        "value": "[INF] Production.Talent.Cast.Extras.EN: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621767,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.51",
+        "value": "[INF] Production.Subtitle: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621768,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.52",
+        "value": "[INF] Production.Subtitle.Curated: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621769,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.50",
+        "value": "[INF] Production.Studio.FR: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621770,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.39",
+        "value": "[INF] Production.Language.Original.FR: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621771,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.37",
+        "value": "[INF] Production.Language.Original.DE: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621772,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.38",
+        "value": "[INF] Production.Language.Original.EN: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621773,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.35",
+        "value": "[INF] Production.Genre.EN: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621774,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.79",
+        "value": "[INF] https://s3-t3m-previewpriv-or-1.s3.us-west-2.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_lp.f4v: Asset created"
+      },
+      {
+        "id": 2843621775,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.36",
+        "value": "[INF] Production.Genre.FR: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621776,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.44",
+        "value": "[INF] Production.Shoot.Year: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621777,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.45",
+        "value": "[INF] Production.Shotlist.DE: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621778,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.42",
+        "value": "[INF] Production.Resolution: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621779,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.43",
+        "value": "[INF] Production.Shoot.Decade: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621780,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.40",
+        "value": "[INF] Production.Language.Subtitle: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621781,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.84",
+        "value": "[INF] https://cdnt3m-a.akamaihd.net/tem/warehouse/1RV/F3C/1RVF3C_JBCE3SSZRS_xt.jpg: Asset created"
+      },
+      {
+        "id": 2843621782,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.41",
+        "value": "[INF] Production.Narrator: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621783,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.85",
+        "value": "[INF] https://s3-t3m-compsfast-or-2.s3.us-west-2.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_mc-wmpg%2Covtc.mp4: Asset created"
+      },
+      {
+        "id": 2843621784,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.82",
+        "value": "[INF] https://s3-vtn-progress-editshare-or-1.s3.us-west-2.amazonaws.com/DEFA05341__Der%20Augenzeuge%201964-03.mp4: Asset created"
+      },
+      {
+        "id": 2843621785,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.83",
+        "value": "[INF] https://s3-t3m-previewpriv-or-1.s3.us-west-2.amazonaws.com/1RV/985/1RV985_001_lp.f4v: Asset created"
+      },
+      {
+        "id": 2843621786,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.80",
+        "value": "[INF] https://s3-t3m-previewpriv-or-1.s3.us-west-2.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_sp-wmpg.f4v: Asset created"
+      },
+      {
+        "id": 2843621787,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.81",
+        "value": "[INF] https://cdnt3m-a.akamaihd.net/tem/warehouse/1RV/F3C/1RVF3C_JBCE3SSZRS_st.jpg: Asset created"
+      },
+      {
+        "id": 2843621788,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.TDO.SyncTime",
+        "value": "2025-07-16 11:30:45"
+      },
+      {
+        "id": 2843621789,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.28",
+        "value": "[INF] Production.Edit.Color: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621790,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.29",
+        "value": "[INF] Production.Edit.Digitized: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621791,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.26",
+        "value": "[INF] Production.DEFA: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621792,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.27",
+        "value": "[INF] Production.Edit.Cleanfeed: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621793,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.24",
+        "value": "[INF] Production.CountryOfOrigin.EN: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621794,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.68",
+        "value": "[INF] Title.DE: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621795,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.25",
+        "value": "[INF] Production.CountryOfOrigin.FR: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621796,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.69",
+        "value": "[INF] Title.EN: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621797,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.33",
+        "value": "[INF] Production.FrameRate: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621798,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.77",
+        "value": "[INF] https://s3-t3m-previewpriv-or-1.s3.us-west-2.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_mp.f4v: Asset created"
+      },
+      {
+        "id": 2843621799,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.34",
+        "value": "[INF] Production.Genre.DE: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621800,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.78",
+        "value": "[INF] https://s3-t3m-previewpriv-or-1.s3.us-west-2.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_xp.f4v: Asset created"
+      },
+      {
+        "id": 2843621801,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.31",
+        "value": "[INF] Production.Format.Digitized: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621802,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.75",
+        "value": "[INF] https://s3-t3m-previewpriv-or-1.s3.us-west-2.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_lp-wmpg%2Covtc.f4v: Asset created"
+      },
+      {
+        "id": 2843621803,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.32",
+        "value": "[INF] Production.Format.Original: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621804,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.76",
+        "value": "[INF] https://cdnt3m-a.akamaihd.net/tem/warehouse/1RV/F3C/1RVF3C_JBCE3SSZRS_lt.jpg: Asset created"
+      },
+      {
+        "id": 2843621805,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.73",
+        "value": "[INF] Transcription.EN: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621806,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.30",
+        "value": "[INF] Production.Format: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621807,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.74",
+        "value": "[INF] Workflow.Transcript.Status: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621808,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.71",
+        "value": "[INF] Topic.Discovery: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621809,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.72",
+        "value": "[INF] Transcription.Corrected: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621810,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.70",
+        "value": "[INF] Title.FR: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621811,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.19",
+        "value": "[INF] Production.Codec: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621812,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.17",
+        "value": "[INF] Production.AudioSampleRate: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621813,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.18",
+        "value": "[INF] Production.ClosedCaption: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621814,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.15",
+        "value": "[INF] Production.AspectRatio: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621815,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.59",
+        "value": "[INF] Production.User.Id: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621816,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.16",
+        "value": "[INF] Production.AudioBitDepth: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621817,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.13",
+        "value": "[INF] Production.Accounting.ArticleRange: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621818,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.57",
+        "value": "[INF] Production.Talent.Cast.Principals.EN: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621819,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.14",
+        "value": "[INF] Production.Accounting.License: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621820,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.58",
+        "value": "[INF] Production.Talent.Cast.Principals.FR: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621821,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.4",
+        "value": "[INF] Description.DE: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621822,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.22",
+        "value": "[INF] Production.Cognition.TextRecognition: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621823,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.66",
+        "value": "[INF] TE.Priority: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621824,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.5",
+        "value": "[INF] Description.EN: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621825,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.23",
+        "value": "[INF] Production.CountryOfOrigin.DE: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621826,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.67",
+        "value": "[INF] TE.ZombieDate: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621827,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.2",
+        "value": "[INF] Commerce.Rendition: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621828,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.20",
+        "value": "[INF] Production.Cognition.FaceRecognition: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621829,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.64",
+        "value": "[INF] TE.IsUpdate: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621830,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.3",
+        "value": "[INF] DMH.Notes2: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621831,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.21",
+        "value": "[INF] Production.Cognition.SpeakerSeperation: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621832,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.65",
+        "value": "[INF] TE.LiveDate: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621833,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.62",
+        "value": "[INF] Supplier.Title: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621834,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.1",
+        "value": "[INF] Audio.Notes: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621835,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.63",
+        "value": "[INF] Supplier.Uuid: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621836,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.60",
+        "value": "[INF] Supplier.ParentClip: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621837,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.61",
+        "value": "[INF] Supplier.Rights: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621838,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.8",
+        "value": "[INF] Format.ScanType.Detail: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621839,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.9",
+        "value": "[INF] Keywords.DE: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621840,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.6",
+        "value": "[INF] Description.FR: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621841,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:58Z",
+        "name": "AiWare.Report.All.7",
+        "value": "[INF] Format.ScanType.ContainsInterlaced: Not mapped to an aiWare schema"
+      },
+      {
+        "id": 2843621842,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:30:59Z",
+        "name": "AiWare.TDO.Id",
+        "value": "3710569294"
+      },
+      {
+        "id": 2843621948,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2025-07-16T11:35:19Z",
+        "name": "AiWare.Transcription.Timeline",
+        "value": "[15;27-23;29] Der Jüdische Friedhof in Berlin Weißensee. 1880 wurde er geweiht. [24;11-30;05] 113.000 Menschen haben auf diesem größten Friedhof Deutschlands ihre letzte Ruhe gefunden. [38;27-43;05] Der Ehren Hain für die gefallenen jüdischen Soldaten des Ersten Weltkrieges. [44;28-50;16] 113.000 jüdische Menschen fanden hier bis 1938 ihre letzte Ruhe. [50;26-52;25] Wie groß müsste der Friedhof sein, [52;25-56;04] der all die jüdischen Opfer des Faschismus aufnehmen sollte? [56;22-01:04;07] Das Mausoleum des 1926 verstorbenen Opernsänger Josef Schwarz. Illegal lebende Juden retteten sich, [01:04;07-01:07;09] indem sie Asyl unter dem Dach des Grabmal fanden. [01:19;27-01:28;07] Gedenktafeln und Asche. Einzige Erinnerung an 55.000 Berliner Juden Männer. Frauen, [01:28;28-01:29;16] Kinder. [01:41;19-01:45;13] Auschwitz ein Wort, das die Hölle bedeutete, schlimmer noch, [01:45;13-01:51;19] das den Gas Tod bedeutete. Und das sind Bestien, [01:51;19-01:56;18] die der Hölle vorstanden, die vergasten und erschossen, hängten und erschlugen. [01:57;03-02:02;21] 18 Jahre nach Kriegsende stehen sie vor einem westdeutschen Gericht, ungerührt und arrogant. [02:03;05-02:06;15] Sie, die 18 Jahre lang als wohlsituierte Bürger lebten, [02:07;02-02:10;17] nicht auf der Anklagebank sitzen die Herren von IG Farben, [02:10;17-02:16;01] die Lieferanten des Giftgas Zyklon B, die Organisatoren des perfekten Mordes. [02:16;13-02:20;07] Zusammen mit dem Gericht aber klagen 6 Millionen jüdische Opfer an [02:20;07-02:24;14] und verlangen endlich Sühne für dieses größte Verbrechen in der Weltgeschichte. [02:34;24-02:37;09] Seit dem Apostel Petrus ist kein Papst mehr [02:37;09-02:40;03] zu den heiligen Stätten des Christentums zurückgekehrt. [02:40;10-02:43;23] Papst Paul sechste trat als erstes katholisches Oberhaupt [02:43;23-02:46;05] eine Reise nach Jordanien und Israel an. [02:50;29-02:56;11] Und an dieser Stelle soll nach der Überlieferung der Apostel Johannes Christus getauft haben. [02:57;02-03:02;20] Die Politik seines Vorgängers, Papst Johannes 23 fortsetzend, richtete Paul sechs. [03:02;27-03:04;26] Die Bitte an alle Staatschefs der Welt, [03:04;27-03:09;25] den Frieden zu erhalten und bei dieser Aufgabe nachhaltiger zusammenzuarbeiten. [03:10;08-03:15;04] Von Jerusalem aussandte der Papst an den Staatsratsvorsitzenden Walter Ulbricht ein Telegramm, [03:15;04-03:18;23] in dem es hieß Wir versichern Sie unseres Gebetes zum Herrn [03:18;23-03:23;15] für Wohlergehen und Frieden aller Völker in Gerechtigkeit und Liebe. [03:32;20-03:35;12] Immer noch kämpft Kuba um die Beseitigung der Schäden, [03:35;12-03:38;02] die der Hurrikan Flora auf der Insel anrichtete. [03:38;11-03:41;17] Aus allen Teilen der Welt trafen Spenden in Kuba ein, [03:41;17-03:46;08] aus der UdSSR und England, Frankreich und Kanada, Mexiko, China, [03:46;08-03:54;27] der DDR und vielen anderen Nationen. Nahrungsmittel, [03:54;27-04:00;13] Textilien und Medikamente wurden sofort umgeladen und in die betroffenen Gebiete gebracht. [04:00;20-04:06;14] Ministerpräsident Fidel Castro erklärte, dass die eigene Kraft und die internationale Solidarität, [04:06;14-04:13;23] die Natur, Schäden überwinden werden. Warschau baut. [04:14;02-04:17;05] Inmitten des Stadtzentrums entstehen neue Wohnhäuser. [04:41;04-04:45;01] Ein Blick von einem der 24 stöckigen Wolkenkratzer auf die Stadt, [04:45;07-04:49;19] die wirklich schwindelfrei seien. Erbauer dieser Häuser versicherten unserem Kameramann, [04:49;19-04:53;03] dass der stählerne Rundbau bald von den Mietern bezogen werden kann. [04:54;16-04:56;14] Im Dunkeln sind alle Katzen grau. [04:56;22-04:59;28] Im Lichte der Scheinwerfer und bei der internationalen Katzenstreu. [05:00;06-05:04;09] In Rotterdam aber funkeln sie mit Augen und Fell in allen Schattierungen. [05:06;03-05:09;12] Ob das der oder ist es eine, die Sieger sein wird. [05:29;20-05:32;17] Sollte diese Dame oder der Herr? Nein, [05:32;17-05:36;28] so schnell kann wohl keinem dieser Exemplare das Fell über die Ohren gezogen werden. [05:44;25-05:47;07] Katzen sind doch was Niedliches, nicht wahr? [05:55;03-05:58;26] Größter Verkehrsbetrieb unserer Republik ist die Deutsche Reichsbahn. [05:59;06-06:03;13] Schnee und Frost stellen an die Eisenbahner besonders hohe Anforderungen. [06:03;19-06:07;24] Auf dem Betriebs und Bahnhof Rummelsburg, dem bedeutendsten in Berlin, [06:07;25-06:10;06] sind die Arbeitsbedingungen hart geworden. [06:16;15-06:19;03] Nicht nur das Reinigen der Wagen wird hier erledigt, [06:19;03-06:22;13] erschwert durch die angeborene Sauberkeit einiger Reisender. [06:22;22-06:27;07] Die ankommenden Lehr züge werden technisch überprüft, neu zusammengestellt, [06:27;07-06:35;24] um rangiert und dann wieder für den nationalen oder internationalen Reiseverkehr freigegeben. Du. [06:46;20-06:49;15] In einem Wettbewerb verpflichteten sich die Eisenbahner, [06:49;15-06:54;05] die Leer Parks schnell und pünktlich wieder dem Berliner Ostbahnhof zu übergeben. [07:38;14-07:41;20] Trotz des Winters jetzt schon gute Fahrt während des [07:41;20-07:44;23] Sommers Fahrplans der Deutschen Reichsbahn in den Urlaub. [07:54;04-07:57;29] Im Prager Eispalast traf sich die Weltelite der Eiskunstläufer. Alles, [07:57;29-08:01;27] was bei Europa und Weltmeisterschaften Rang und Namen hatte, war hier vertreten. [08:02;08-08:05;08] Das bekannte sowjetische Paar Philosoph Proton Popow. [08:18;25-08:22;14] Die Weltmeister im Eis tanzen. Roman. Koffer. Roman CSSR. [08:40;17-08:45;04] Abschließend dokumentierte der Kanadier Jackson, dass er nach wie vor zur Weltspitze zählt. [09:03;02-09:07;27] Zur dritten Serie der insgesamt vier Qualifikations Wettbewerbe für die Olympischen Winterspiele [09:08;01-09:11;23] trafen sich die besten Spezial Sprung Läufer beider deutscher Staaten in Oberhof. [09:11;29-09:16;06] Von den westdeutschen Springern hatte nur noch Burghardt Aussicht, nach Innsbruck zu kommen. [09:18;10-09:26;12] Der bekannte westdeutsche Hubble. Apple schaffte nur Platz 23, [09:26;12-09:36;11] der oberste Offer Max Burkhardt. 69,5 Meter DDR. Springer Neuendorf. [09:40;14-09:50;21] Neuendorf wurde 6. Oktober aus Hinterzarten. Mit DDR Springer Schramm wurde Thoma Dritter. [09:50;25-10:02;26] Karlheinz Munk aus Zell an Melles. Sie ist. [10:03;03-10:08;01] Mit 77,5 Metern stellte Munk den Schanzen Rekord ein. Er wurde Zweiter. [10:08;06-10:09;07] Dieter Bock Low. [10:22;18-10:27;03] München Mit den Siegen in Oberhof und Klingenthal stellt [10:27;03-10:29;05] die DDR bis auf den Oberstdorf Erfolg hat, [10:29;05-10:35;25] alle Spezial Sprung Läufe für die Olympischen Winterspiele. Und."
+      },
+      {
+        "id": 3758538157,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2026-09-21T12:27:05Z",
+        "name": "Rights.EditorialUse",
+        "value": "none"
+      },
+      {
+        "id": 3758538158,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2026-09-21T12:27:05Z",
+        "name": "Rights.Geography",
+        "value": "AD,AE,AF,AG,AI,AL,AM,AO,AQ,AR,AS,AU,AW,AX,AZ,BA,BB,BD,BF,BG,BH,BI,BJ,BL,BM,BN,BO,BQ,BR,BS,BT,BV,BW,BY,BZ,CA,CC,CD,CF,CG,CI,CK,CL,CM,CN,CO,CR,CU,CV,CW,CX,CY,CZ,DJ,DK,DM,DO,DZ,EC,EE,EG,EH,ER,ES,ET,FI,FJ,FK,FM,FO,FR,GA,GB,GD,GE,GF,GG,GH,GI,GL,GM,GN,GP,GQ,GR,GS,GT,GU,GW,GY,HK,HM,HN,HR,HT,HU,ID,IE,IL,IM,IN,IO,IQ,IR,IS,IT,JE,JM,JO,JP,KE,KG,KH,KI,KM,KN,KP,KR,KW,KY,KZ,LA,LB,LC,LK,LR,LS,LT,LV,LY,MA,MC,MD,ME,MF,MG,MH,MK,ML,MM,MN,MO,MP,MQ,MR,MS,MT,MU,MV,MW,MX,MY,MZ,NA,NC,NE,NF,NG,NI,NL,NO,NP,NR,NU,NZ,OM,PA,PE,PF,PG,PH,PK,PL,PM,PN,PR,PS,PT,PW,PY,QA,RE,RO,RS,RU,RW,SA,SB,SC,SD,SE,SG,SH,SI,SJ,SK,SL,SM,SN,SO,SR,SS,ST,SV,SX,SY,SZ,TC,TD,TF,TG,TH,TJ,TK,TL,TM,TN,TO,TR,TT,TV,TW,TZ,UA,UG,UM,US,UY,UZ,VA,VC,VE,VG,VI,VN,VU,WF,WS,XK,YE,YT,ZA,ZM,ZW"
+      },
+      {
+        "id": 3758538159,
+        "clipId": 60228265,
+        "inherited": false,
+        "modified": "2026-09-21T12:27:05Z",
+        "name": "Rights.Control.Clips",
+        "value": "none"
+      }
+    ],
+    "renditions": [
+      {
+        "id": 131042592,
+        "clipId": 60228265,
+        "created": "2025-07-15T12:56:18Z",
+        "format": "f4v",
+        "name": "1RV985_001_lp.f4v",
+        "purpose": "p",
+        "size": "s",
+        "uri": "t3://S3ViaAkamaiStream:2e6960df-8601-4595-b0cc-aaf7330c2e8a@s3-t3m-previewpriv-or-1.s3.amazonaws.com/1RV/985/1RV985_001_lp.f4v",
+        "variant": ",wmpg,"
+      },
+      {
+        "id": 131042593,
+        "clipId": 60228265,
+        "created": "2025-07-15T12:56:19Z",
+        "filesize": 110932480,
+        "format": "mp4",
+        "name": "DEFA05341__Der Augenzeuge 1964-03.mp4",
+        "note": ",SourceReference=2025-07-15 12:55:12,",
+        "purpose": "m",
+        "size": "f",
+        "uri": "t3://S3ViaS3Signed:81b908cf-4aa4-4a4c-954d-70dbf3a69baa@s3-vtn-progress-editshare-or-1.s3.amazonaws.com/DEFA05341__Der+Augenzeuge+1964-03.mp4"
+      },
+      {
+        "id": 131042607,
+        "clipId": 60228265,
+        "created": "2025-07-15T13:01:23Z",
+        "filesize": 4401,
+        "format": "jpg",
+        "name": "1RVF3C_JBCE3SSZRS_st.jpg",
+        "purpose": "t",
+        "size": "s",
+        "uri": "t3://S3ViaAkamai:f3427bd4-e75c-4e4d-9c16-7e4bb2ef8bf8@s3-t3m-previewpub-or-1.s3.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_st.jpg"
+      },
+      {
+        "id": 131042608,
+        "clipId": 60228265,
+        "created": "2025-07-15T13:01:24Z",
+        "filesize": 41225,
+        "format": "jpg",
+        "name": "1RVF3C_JBCE3SSZRS_lt.jpg",
+        "purpose": "t",
+        "size": "l",
+        "uri": "t3://S3ViaAkamai:f3427bd4-e75c-4e4d-9c16-7e4bb2ef8bf8@s3-t3m-previewpub-or-1.s3.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_lt.jpg"
+      },
+      {
+        "id": 131042609,
+        "clipId": 60228265,
+        "created": "2025-07-15T13:01:25Z",
+        "filesize": 1417582,
+        "format": "f4v",
+        "name": "1RVF3C_JBCE3SSZRS_sp-wmpg.f4v",
+        "purpose": "p",
+        "size": "s",
+        "uri": "t3://S3ViaAkamaiStream:2e6960df-8601-4595-b0cc-aaf7330c2e8a@s3-t3m-previewpriv-or-1.s3.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_sp-wmpg.f4v",
+        "variant": ",wmpg,"
+      },
+      {
+        "id": 131042630,
+        "clipId": 60228265,
+        "created": "2025-07-15T13:04:44Z",
+        "filesize": 50220715,
+        "format": "f4v",
+        "name": "1RVF3C_JBCE3SSZRS_lp.f4v",
+        "purpose": "p",
+        "size": "l",
+        "uri": "t3://S3ViaAkamaiStream:2e6960df-8601-4595-b0cc-aaf7330c2e8a@s3-t3m-previewpriv-or-1.s3.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_lp.f4v"
+      },
+      {
+        "id": 131042633,
+        "clipId": 60228265,
+        "created": "2025-07-15T13:05:48Z",
+        "filesize": 50221561,
+        "format": "f4v",
+        "name": "1RVF3C_JBCE3SSZRS_xp.f4v",
+        "purpose": "p",
+        "size": "x",
+        "uri": "t3://S3ViaAkamaiStream:2e6960df-8601-4595-b0cc-aaf7330c2e8a@s3-t3m-previewpriv-or-1.s3.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_xp.f4v"
+      },
+      {
+        "id": 131042637,
+        "clipId": 60228265,
+        "created": "2025-07-15T13:05:56Z",
+        "filesize": 2045621,
+        "format": "f4v",
+        "name": "1RVF3C_JBCE3SSZRS_mp.f4v",
+        "purpose": "p",
+        "size": "m",
+        "uri": "t3://S3ViaAkamaiStream:2e6960df-8601-4595-b0cc-aaf7330c2e8a@s3-t3m-previewpriv-or-1.s3.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_mp.f4v"
+      },
+      {
+        "id": 131042638,
+        "clipId": 60228265,
+        "created": "2025-07-15T13:06:02Z",
+        "filesize": 55505349,
+        "format": "f4v",
+        "name": "1RVF3C_JBCE3SSZRS_lp-wmpg,ovtc.f4v",
+        "purpose": "p",
+        "size": "l",
+        "uri": "t3://S3ViaAkamaiStream:2e6960df-8601-4595-b0cc-aaf7330c2e8a@s3-t3m-previewpriv-or-1.s3.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_lp-wmpg,ovtc.f4v",
+        "variant": ",ovtc,wmpg,"
+      },
+      {
+        "id": 131042639,
+        "clipId": 60228265,
+        "created": "2025-07-15T13:06:02Z",
+        "filesize": 55646571,
+        "format": "mp4",
+        "name": "1RVF3C_JBCE3SSZRS_mc-wmpg,ovtc.mp4",
+        "purpose": "c",
+        "size": "m",
+        "uri": "t3://S3ViaS3Signed:aab9d736-c46b-44f1-b7c6-99130bb8df9d@s3-t3m-compsfast-or-2.s3.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_mc-wmpg,ovtc.mp4",
+        "variant": ",ovtc,wmpg,"
+      },
+      {
+        "id": 131042677,
+        "clipId": 60228265,
+        "created": "2025-07-15T13:14:05Z",
+        "filesize": 403745,
+        "format": "jpg",
+        "name": "1RVF3C_JBCE3SSZRS_xt.jpg",
+        "purpose": "t",
+        "size": "x",
+        "uri": "t3://S3ViaAkamai:f3427bd4-e75c-4e4d-9c16-7e4bb2ef8bf8@s3-t3m-previewpub-or-1.s3.amazonaws.com/1RV/F3C/1RVF3C_JBCE3SSZRS_xt.jpg"
+      }
+    ],
+    "priority": 5,
+    "supplierId": 31637981,
+    "supplier": {
+      "id": 31637981,
+      "address": "",
+      "city": "",
+      "contact": "",
+      "country": "",
+      "created": "2021-06-22T00:00:00Z",
+      "description": "",
+      "devName": "progress",
+      "email": "",
+      "markup": "",
+      "name": "Progress",
+      "phone": "",
+      "rmPricing": false,
+      "state": "",
+      "supplierIds": "1RV",
+      "type": "Supplier",
+      "zipcode": "",
+      "data": [
+        {
+          "id": 45416,
+          "supplierId": 31637981,
+          "name": "UseStemmedThesaurus",
+          "value": "true"
+        },
+        {
+          "id": 45417,
+          "supplierId": 31637981,
+          "name": "AiWare.ApiKey",
+          "value": "68b514:fac7b78087844aaf9b5cad552e4f43babd754db2a2ad4619b1f62fe75bd0269f"
+        },
+        {
+          "id": 45418,
+          "supplierId": 31637981,
+          "name": "AiWare.OrganizationId",
+          "value": "36170"
+        },
+        {
+          "id": 45419,
+          "supplierId": 31637981,
+          "name": "AiWare.ImportAssets",
+          "value": "false"
+        },
+        {
+          "id": 45420,
+          "supplierId": 31637981,
+          "name": "AiWare.AllowJobs",
+          "value": "true"
+        },
+        {
+          "id": 45421,
+          "supplierId": 31637981,
+          "name": "Status",
+          "value": "Active"
+        },
+        {
+          "id": 45422,
+          "supplierId": 31637981,
+          "name": "CategoryType",
+          "value": "Platform"
+        },
+        {
+          "id": 45423,
+          "supplierId": 31637981,
+          "name": "Licensing",
+          "value": "false"
+        },
+        {
+          "id": 45424,
+          "supplierId": 31637981,
+          "name": "Platform",
+          "value": "true"
+        },
+        {
+          "id": 45425,
+          "supplierId": 31637981,
+          "name": "ContributorSegmentation",
+          "value": "AllElse"
+        },
+        {
+          "id": 45426,
+          "supplierId": 31637981,
+          "name": "ContentCategory",
+          "value": "Studio"
+        },
+        {
+          "id": 45427,
+          "supplierId": 31637981,
+          "name": "Exclusive",
+          "value": "false"
+        },
+        {
+          "id": 45428,
+          "supplierId": 31637981,
+          "name": "AutoRenew",
+          "value": "false"
+        },
+        {
+          "id": 45886,
+          "supplierId": 31637981,
+          "name": "Fee.Platform.Transcode",
+          "value": "0"
+        },
+        {
+          "id": 45887,
+          "supplierId": 31637981,
+          "name": "Fee.Platform.International",
+          "value": "0"
+        },
+        {
+          "id": 45888,
+          "supplierId": 31637981,
+          "name": "Fee.Platform.Offline",
+          "value": "0"
+        },
+        {
+          "id": 45889,
+          "supplierId": 31637981,
+          "name": "Fee.Platform.Storage",
+          "value": "0"
+        },
+        {
+          "id": 45890,
+          "supplierId": 31637981,
+          "name": "Supplier.Tier",
+          "value": "5"
+        },
+        {
+          "id": 45891,
+          "supplierId": 31637981,
+          "name": "TemSearchSupplierRank",
+          "value": "5"
+        },
+        {
+          "id": 45892,
+          "supplierId": 31637981,
+          "name": "CorbisSearchSupplierRank",
+          "value": "5"
+        },
+        {
+          "id": 45893,
+          "supplierId": 31637981,
+          "name": "BBCSearchSupplierRank",
+          "value": "5"
+        },
+        {
+          "id": 46227,
+          "supplierId": 31637981,
+          "name": "Media.Contact",
+          "value": "alerts-uk-dmh-workflo-aaaae2sevzjiaulswcpa5rqhbu@veritone.slack.com"
+        }
+      ]
+    },
+    "zombieDate": "2025-07-15T13:14:48Z"
+  }
+}

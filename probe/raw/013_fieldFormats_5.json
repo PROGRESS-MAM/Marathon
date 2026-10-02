@@ -1,0 +1,119 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/clip/fieldFormats",
+    "params": {
+      "fieldNames": "Format.FieldOrder,Format.AudioSamplingRate,Format.FrameRateVariable,Format.TimecodeTrack.Present,Format.TimeStart,Format.AudioChannelConfiguration,Format.BitDepth,Format.FrameSize,Format.TimeEnd,TE.IsUpdate,Format.ScanType.Detail,SI.Format.Duration,SI.Format.FrameSizeRatio,SI.Format.FrameRate,Format.SpeedviewStart,Format.SpeedviewEnd,TWK.Workflow.Evaluate,TWK.HasRenditions,Commerce.Rendition,IsLicensable.DMH,TWK.IsLicensable.DMH,Resource.SiteAccess,TWK.PurchaseBlock,TWK.SearchBlock,TE.ZombieDate,TWK.Cognate.Category,AiWare.Report.All.48,AiWare.Report.All.49,AiWare.Report.All.46,AiWare.Report.All.47,AiWare.Report.All.11,AiWare.Report.All.55,AiWare.Report.All.12,AiWare.Report.All.56,AiWare.Report.All.53,AiWare.Report.All.10,AiWare.Report.All.54,AiWare.Report.All.51,AiWare.Report.All.52,AiWare.Report.All.50"
+    },
+    "body": null
+  },
+  "status": 200,
+  "response": [
+    {
+      "name": "Format.FieldOrder",
+      "dataType": "pick-list",
+      "array": false
+    },
+    {
+      "name": "Format.AudioSamplingRate",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Format.FrameRateVariable",
+      "dataType": "boolean",
+      "array": false
+    },
+    {
+      "name": "Format.TimecodeTrack.Present",
+      "dataType": "boolean",
+      "array": false
+    },
+    {
+      "name": "Format.TimeStart",
+      "dataType": "timecode",
+      "array": false
+    },
+    {
+      "name": "Format.AudioChannelConfiguration",
+      "array": false
+    },
+    {
+      "name": "Format.BitDepth",
+      "dataType": "pick-list",
+      "array": false
+    },
+    {
+      "name": "Format.FrameSize",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Format.TimeEnd",
+      "dataType": "timecode",
+      "array": false
+    },
+    {
+      "name": "TE.IsUpdate",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Format.ScanType.Detail",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "SI.Format.Duration",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "SI.Format.FrameSizeRatio",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "SI.Format.FrameRate",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Format.SpeedviewStart",
+      "dataType": "timecode",
+      "array": false
+    },
+    {
+      "name": "Format.SpeedviewEnd",
+      "dataType": "timecode",
+      "array": false
+    },
+    {
+      "name": "Commerce.Rendition",
+      "dataType": "text",
+      "delimiter": " ",
+      "array": false
+    },
+    {
+      "name": "IsLicensable.DMH",
+      "dataType": "boolean",
+      "array": false
+    },
+    {
+      "name": "Resource.SiteAccess",
+      "dataType": "text",
+      "delimiter": " ",
+      "array": false
+    },
+    {
+      "name": "TE.ZombieDate",
+      "dataType": "date",
+      "array": false
+    },
+    {
+      "name": "TWK.Cognate.Category",
+      "dataType": "text",
+      "array": false
+    }
+  ]
+}

@@ -1,0 +1,218 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/clip/fieldFormats",
+    "params": {
+      "fieldNames": "Production.Format.Original,Production.FrameRate,Production.Genre.DE,Production.Genre.EN,Production.Genre.FR,Production.Language.Original.DE,Production.Language.Original.EN,Production.Language.Original.FR,Production.Language.Subtitle,Production.Narrator,Production.Resolution,Production.Shoot.Decade,Production.Shoot.Year,Production.Shotlist.DE,Production.Shotlist.EN,Production.Shotlist.FR,Production.Studio.DE,Production.Studio.EN,Production.Studio.FR,Production.Subtitle,Production.Subtitle.Curated,Production.Talent.Cast.Extras.DE,Production.Talent.Cast.Extras.EN,Production.Talent.Cast.Extras.FR,Production.Talent.Cast.Principals.DE,Production.Talent.Cast.Principals.EN,Production.Talent.Cast.Principals.FR,Production.User.Id,Rights.Agent,Supplier.Barcode,Supplier.Collection,Supplier.ParentClip,Supplier.Rights,Supplier.Source,Supplier.Title,Supplier.Uuid,TE.OriginalName,Title,Title.DE,Title.EN"
+    },
+    "body": null
+  },
+  "status": 200,
+  "response": [
+    {
+      "name": "Production.Format.Original",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.FrameRate",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Genre.DE",
+      "dataType": "text",
+      "delimiter": ",",
+      "array": false
+    },
+    {
+      "name": "Production.Genre.EN",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Genre.FR",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Language.Original.DE",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Language.Original.EN",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Language.Original.FR",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Language.Subtitle",
+      "dataType": "text",
+      "delimiter": ";",
+      "array": false
+    },
+    {
+      "name": "Production.Narrator",
+      "dataType": "text",
+      "delimiter": ";",
+      "array": false
+    },
+    {
+      "name": "Production.Resolution",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Shoot.Decade",
+      "dataType": "text",
+      "delimiter": ",",
+      "array": false
+    },
+    {
+      "name": "Production.Shoot.Year",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Shotlist.DE",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Shotlist.EN",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Shotlist.FR",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Studio.DE",
+      "dataType": "paragraph",
+      "array": false
+    },
+    {
+      "name": "Production.Studio.EN",
+      "dataType": "paragraph",
+      "array": false
+    },
+    {
+      "name": "Production.Studio.FR",
+      "dataType": "paragraph",
+      "array": false
+    },
+    {
+      "name": "Production.Subtitle",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Subtitle.Curated",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Talent.Cast.Extras.DE",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Talent.Cast.Extras.EN",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Talent.Cast.Extras.FR",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Talent.Cast.Principals.DE",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Talent.Cast.Principals.EN",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.Talent.Cast.Principals.FR",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Production.User.Id",
+      "dataType": "text",
+      "delimiter": ",",
+      "array": false
+    },
+    {
+      "name": "Rights.Agent",
+      "dataType": "paragraph",
+      "array": false
+    },
+    {
+      "name": "Supplier.Barcode",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Supplier.Collection",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Supplier.ParentClip",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Supplier.Rights",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Supplier.Source",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Supplier.Title",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Supplier.Uuid",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "TE.OriginalName",
+      "dataType": "text",
+      "array": false
+    },
+    {
+      "name": "Title",
+      "dataType": "paragraph",
+      "array": false
+    },
+    {
+      "name": "Title.DE",
+      "dataType": "paragraph",
+      "array": false
+    },
+    {
+      "name": "Title.EN",
+      "dataType": "paragraph",
+      "array": false
+    }
+  ]
+}

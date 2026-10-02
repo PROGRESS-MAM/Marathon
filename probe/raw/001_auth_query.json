@@ -1,0 +1,109 @@
+{
+  "request": {
+    "method": "GET",
+    "path": "/v1/search",
+    "params": {
+      "q": "",
+      "n": 1
+    },
+    "body": null
+  },
+  "status": 200,
+  "response": {
+    "items": [
+      {
+        "assetId": 50628728,
+        "name": "1RVADD_93AC6N8SV4",
+        "metaData": [
+          {
+            "name": "Title",
+            "value": "\"... das Wort Rache ist mir fremd\". Wie lebt ein Jude nach 1945 in Deutschland?"
+          },
+          {
+            "name": "Description",
+            "value": "SchülerInnen des Karl-Friedrich-Schinkel-Gymnasiums im Gespräch mit Alfred Jachmann"
+          },
+          {
+            "name": "Description.Date",
+            "value": "1994-01-01T00:00:00Z"
+          },
+          {
+            "name": "Supplier.Collection",
+            "value": "Thomas Grimm History Archive"
+          },
+          {
+            "name": "Production.Genre.EN",
+            "value": "Interview"
+          },
+          {
+            "name": "Rights.Status",
+            "value": ""
+          }
+        ],
+        "metaDataDefault": [
+          {
+            "name": "TE.DigitalFormat",
+            "value": "High Definition"
+          },
+          {
+            "name": "Resource.Class",
+            "value": "Footage"
+          },
+          {
+            "name": "Format.TimeStart",
+            "value": "10:45:00:00"
+          },
+          {
+            "name": "Format.FrameSize",
+            "value": "1920 x 1080"
+          },
+          {
+            "name": "Format.FrameRate",
+            "value": "25 fps"
+          },
+          {
+            "name": "Format.Duration",
+            "value": "00:43:28"
+          },
+          {
+            "name": "AiWare.TDO.Id",
+            "value": "2110716383"
+          },
+          {
+            "name": "Rights.Reproduction",
+            "value": "Rights Managed"
+          },
+          {
+            "name": "clipIngested",
+            "value": "2022-06-22T04:41:46Z"
+          },
+          {
+            "name": "TE.ParentClip",
+            "value": ""
+          },
+          {
+            "name": "AiWare.Cloned.TDO.Ids",
+            "value": ""
+          },
+          {
+            "name": "Format.Duration.Display",
+            "value": ""
+          }
+        ],
+        "thumbnail": {
+          "name": "thumbnail",
+          "urls": {
+            "https": "//cdnt3m-a.akamaihd.net/tem/warehouse/1RV/ADD/1RVADD_93AC6N8SV4_lt.jpg"
+          }
+        },
+        "hasDownloadableComp": false
+      }
+    ],
+    "totalCount": 28754,
+    "currentPage": 0,
+    "pageSize": 1,
+    "hasNextPage": true,
+    "numberOfPages": 28754,
+    "hasPreviousPage": false
+  }
+}
