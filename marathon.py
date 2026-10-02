@@ -14,7 +14,7 @@ import unicodedata
 from collections import defaultdict
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
-from time import perf_counter
+from time import perf_counter, sleep
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
@@ -95,13 +95,14 @@ token_keys = ("vt_api_token", "api_key", "apiKey", "token", "access_token")
 veritone_page_size, veritone_timeout = 200, 120  # Search and byIds take at most 200 per call.
 veritone_placeholder = ("Production.Codec", "placeholder")  # Field and casefolded value of placeholder assets.
 veritone_passes = 3  # Paging is not always stable; missing assets are searched again in further passes.
+veritone_settle_seconds = 30  # Wait between triggering a search and reading its pages; the API has no "done" signal.
 tracked_fields = {"collection": "Kollektion", "identifier": field_names["identifier"], "title": field_names["title"],
                   "clip_name_with_extension": field_names["clip_name"], "master_files": field_names["userpath"],
                   "filehashes": field_names["hash"]}
 
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "1.4.2"
+app_version = "1.4.3"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 log_dir = project_dir / "log"
@@ -1007,10 +1008,13 @@ def _item_values(item, name: str) -> list[str]:
     return found + [text for key, value in item.items() for text in (_scalars(value) if key == name else _item_values(value, name))]
 
 
+def _veritone_params(entry: dict) -> dict:
+    return {"q": "", "filterIds": ",".join(entry["veritone_filter_ids"]), "n": veritone_page_size, "i": 0}
+
+
 def _veritone_pages(entry: dict, token: str, ids: dict) -> tuple[int, int, int]:
     """Read all search pages once into ids; returns totalCount, hits read and distinct assets of this pass."""
-    name, read, seen = entry["name"], 0, set()
-    params = {"q": "", "filterIds": ",".join(entry["veritone_filter_ids"]), "n": veritone_page_size, "i": 0}
+    name, read, seen, params = entry["name"], 0, set(), _veritone_params(entry)
     while True:
         page = _veritone_get("/v1/search", token, params)
         if not isinstance(page, dict) or not isinstance(page.get("items"), list) or type(page.get("totalCount")) is not int:
@@ -1032,6 +1036,9 @@ def _veritone_pages(entry: dict, token: str, ids: dict) -> tuple[int, int, int]:
 def _veritone_assets(entry: dict, token: str) -> tuple[list[str], int]:
     """Asset IDs of one collection and the passes needed; raises unless totalCount assets were found in time."""
     name, ids = entry["name"], {}
+    _veritone_get("/v1/search", token, {**_veritone_params(entry), "n": 1})  # Only triggers the search.
+    _search_progress(f"Veritone {name!r}: Suche ausgelöst, lade Ergebnisse in {veritone_settle_seconds} s")
+    sleep(veritone_settle_seconds)
     for number in range(1, veritone_passes + 1):
         total, read, distinct = _veritone_pages(entry, token, ids)
         if len(ids) >= total:
