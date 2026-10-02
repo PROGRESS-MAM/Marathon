@@ -15,6 +15,9 @@ from collections import defaultdict
 from datetime import datetime, time, timedelta, timezone
 from pathlib import Path
 from time import perf_counter
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import Request, urlopen
 
 from toolbox import tb_write_log
 
@@ -62,6 +65,7 @@ problem_categories = {  # kind: (category for new clips, category for clips alre
                 "Metadaten in der Suche jetzt unvollständig oder widersprüchlich"),
     "duplicate": ("Doppelter Identifier/Titel", None),
     "restore": ("Dateinamen und Hashes passen nicht zusammen", None),
+    "veritone": (None, "Nicht mehr bei Veritone"),
 }
 metadata_changed = "Metadaten in der Suche geändert"
 lost_proxy, lost_master = "Verloren – Proxy fehlt", "Verloren – Master fehlt vor Transcode"
@@ -75,7 +79,7 @@ commands_help = {
     "auto-report-off": "Täglichen Auto-Bericht ausschalten",
     "report": "Manuellen Bericht sofort erstellen",
     "create-folders": "Ordnerstruktur aller Kollektionen anlegen",
-    "update-index": "Neue Suche; neue Clips aufnehmen, Abweichungen nur melden",
+    "update-index": "Neue Suche (EditShare ∩ Veritone); neue Clips aufnehmen, Abweichungen nur melden",
     "delete-folder": "SMB-Arbeitsordner bereinigen; Index behalten, Prozesszustand neu aufbauen",
     "status": "Anzeigen, was eingeschaltet ist",
     "help": "Diese Übersicht",
@@ -83,13 +87,17 @@ commands_help = {
 }
 command_aliases = {"exit": "quit", "manual-report": "report", "manueller-report": "report", "auto-report-on": "auto-report"}
 missing_job_grace = timedelta(minutes=30)  # Before a vanished job file is recreated.
+veritone_filter_keys = {"006 Source PROGRESS": "field_source", "007 Collection PROGRESS": "field_collection",
+                        "101a Genre German": "field_genre"}  # EditShare filter field: config key of its Veritone field
+token_keys = ("api_key", "apiKey", "token", "access_token")
+veritone_page_size, veritone_timeout = 200, 120
 tracked_fields = {"collection": "Kollektion", "identifier": field_names["identifier"], "title": field_names["title"],
                   "clip_name_with_extension": field_names["clip_name"], "master_files": field_names["userpath"],
                   "filehashes": field_names["hash"]}
 
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "1.2.0"
+app_version = "1.3.0"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 log_dir = project_dir / "log"
@@ -107,6 +115,8 @@ config_schema = {  # section: {key: kind}; all values and their explanations liv
     "timing": {"cycle_seconds": "number", "max_job_attempts": "number"},
     "limits": {key: "count" for key in limit_keys.values()},
     "heartbeat": {"worker_timeout_minutes": "number", "max_job_hours": "number"},
+    "veritone": {"base_url": "text", "token_file": "text", "field_clip_id": "text",
+                 **{key: "text" for key in veritone_filter_keys.values()}},
 }
 
 # --------- INIT ---------
@@ -178,9 +188,9 @@ def _read_config() -> dict:
                 values[key] = _parse_value(kind, parser.get(section, key, fallback="").strip())
             except ValueError as exc:
                 problems.append(f"[{section}] {key}: {exc}")
-    for key in ("mapping_file", "cred_file"):
+    for section, key in (("paths", "mapping_file"), ("paths", "cred_file"), ("veritone", "token_file")):
         if key in values and not (res_dir / values[key]).is_file():
-            problems.append(f"[paths] {key}: Datei {res_dir / values[key]} fehlt")
+            problems.append(f"[{section}] {key}: Datei {res_dir / values[key]} fehlt")
     if problems:
         raise ValueError("; ".join(problems))
     return values
@@ -846,7 +856,8 @@ def _merge_hit(hit: dict) -> dict:
     rows = hit.pop("rows")
     fields = ("identifier", "title", "clip_name")
     seen = {field: list(dict.fromkeys(value for row in rows for value in row[field])) for field in fields}
-    hit.update(identifier=" / ".join(seen["identifier"]), title=" / ".join(seen["title"]))  # Shown in error lines.
+    hit.update(identifier=" / ".join(seen["identifier"]), title=" / ".join(seen["title"]),  # Shown in error lines.
+               identifiers=seen["identifier"])
     problems = [f"{field_names[field]}: {len(row[field])} Werte" for row in rows for field in fields if len(row[field]) != 1]
     if problems:
         hit["invalid"] = ("; ".join(dict.fromkeys(problems)), None)
@@ -889,7 +900,7 @@ def _search_clips(mapping: list[dict], ctx: dict) -> dict[str, list[dict]]:
     import searcher
 
     keys, api_fields = tuple(field_names), tuple(field_names.values())
-    allowed_filters = {"006 Source PROGRESS", "007 Collection PROGRESS", "101a Genre German"}
+    allowed_filters = set(veritone_filter_keys)
     for entry in mapping:
         unknown = {item["field"] for item in entry["filters"]} - allowed_filters
         if unknown:
@@ -925,6 +936,115 @@ def _search_clips(mapping: list[dict], ctx: dict) -> dict[str, list[dict]]:
         _log(f"API-Suche abgeschlossen: {name!r}: {len(matches)} Trefferzeilen, davon {placeholders} Platzhalter; "
              f"{perf_counter() - started:.1f} s.")
     return {clip_id: [_merge_hit(hit) for hit in hits.values()] for clip_id, hits in found.items()}
+
+
+# --------- FUNC: VERITONE ---------
+def _veritone_token() -> str:
+    with _res("token_file").open(encoding="utf-8-sig") as handle:
+        data = json.load(handle)
+    token = next((data[key] for key in token_keys if isinstance(data.get(key), str) and data[key].strip()), None) \
+        if isinstance(data, dict) else None
+    if not token:
+        raise ValueError(f"{cfg['token_file']}: kein Token gefunden (erwartet einen der Schlüssel {', '.join(token_keys)}).")
+    return token.strip()
+
+
+def _veritone_post(path: str, token: str, body: dict) -> dict:
+    url = f"{cfg['base_url'].rstrip('/')}{path}?{urlencode({'api_key': token})}"
+    request = Request(url, data=json.dumps(body).encode("utf-8"),
+                      headers={"Content-Type": "application/json", "Accept": "application/json"})
+    # Errors are raised without the URL, it contains the token.
+    try:
+        with urlopen(request, timeout=veritone_timeout) as response:
+            page = json.load(response)
+    except HTTPError as exc:
+        raise RuntimeError(f"Veritone antwortet mit HTTP {exc.code} ({exc.reason}) auf {path}; Zustand unverändert.") from None
+    except (URLError, OSError, ValueError) as exc:
+        raise RuntimeError(f"Veritone nicht erreichbar oder Antwort ungültig ({path}): {exc}; Zustand unverändert.") from None
+    if not isinstance(page, dict) or not isinstance(page.get("items"), list) or type(page.get("totalCount")) is not int:
+        raise RuntimeError(f"Unerwartete Veritone-Antwort auf {path}; Zustand unverändert.")
+    return page
+
+
+def _scalars(value) -> list[str]:
+    if isinstance(value, list):
+        return [text for part in value for text in _scalars(part)]
+    if isinstance(value, str) or type(value) is int:
+        return [str(value).strip()] if str(value).strip() else []
+    return []
+
+
+def _item_values(item, name: str) -> list[str]:
+    """All values of a field anywhere in a Veritone item, as key or as name/value pair."""
+    if isinstance(item, list):
+        return [text for part in item for text in _item_values(part, name)]
+    if not isinstance(item, dict):
+        return []
+    found = _scalars(item["value"]) if item.get("name") == name and "value" in item else []
+    return found + [text for key, value in item.items() for text in (_scalars(value) if key == name else _item_values(value, name))]
+
+
+def _veritone_expression(filters: list[dict]) -> dict:
+    parts = [{"fieldExpression": {"fieldName": cfg[veritone_filter_keys[item["field"]]], "op": "Is", "value": item["value"]}}
+             for item in filters]
+    return parts[0] if len(parts) == 1 else {"and": parts}
+
+
+def _veritone_ids(entry: dict, token: str) -> set[str]:
+    """Normalized Clip IDs of one collection; raises unless every reported asset was read with a Clip ID."""
+    name, field = entry["name"], cfg["field_clip_id"]
+    body = {"searchExpression": _veritone_expression(entry["filters"]), "pageSize": veritone_page_size, "pageNumber": 0}
+    ids, read = set(), 0
+    while True:
+        page = _veritone_post("/v1/search/advancedSearch", token, body)
+        for number, item in enumerate(page["items"], read + 1):
+            values = _item_values(item, field)
+            if not values:
+                raise RuntimeError(f"Veritone-Treffer {number} in {name!r} ohne Feld {field!r}; "
+                                   f"[veritone] field_clip_id prüfen. Zustand unverändert.")
+            ids.update(map(_normalize, values))
+        read += len(page["items"])
+        _search_progress(f"Veritone {name!r}: lade {read}/{page['totalCount']}")
+        if not page["items"] or not page.get("hasNextPage") or read >= page["totalCount"]:
+            break
+        body["pageNumber"] = int(page.get("currentPage", body["pageNumber"])) + 1
+    if read != page["totalCount"]:
+        raise RuntimeError(f"Veritone-Abfrage für {name!r} unvollständig: {read} von {page['totalCount']} Treffern gelesen; "
+                           f"Zustand unverändert.")
+    return ids
+
+
+def _veritone_clip_ids(mapping: list[dict]) -> dict[str, set[str]]:
+    token = _veritone_token()
+    _log(f"Veritone-Abfrage gestartet: {len(mapping)} Kollektionen.")
+    result = {}
+    for entry in mapping:
+        started = perf_counter()
+        result[entry["name"]] = _veritone_ids(entry, token)
+        _log(f"Veritone-Abfrage abgeschlossen: {entry['name']!r}: {len(result[entry['name']])} Clip IDs; "
+             f"{perf_counter() - started:.1f} s.")
+    return result
+
+
+def _intersect(found: dict[str, list[dict]], veritone: dict[str, set[str]],
+               mapping: list[dict]) -> tuple[dict[str, list[dict]], set[str]]:
+    """Keep hits whose 001 Identifier is a Clip ID of the same collection at Veritone; also return dropped Clip_IDs."""
+    kept, dropped, counts = {}, set(), defaultdict(lambda: [0, 0])  # collection: [only EditShare, both]
+    for clip_id, hits in found.items():
+        matched = []
+        for hit in hits:
+            shared = bool(veritone[hit["collection"]] & {_normalize(value) for value in hit["identifiers"]})
+            counts[hit["collection"]][shared] += 1
+            matched += [hit] * shared
+        if matched:
+            kept[clip_id] = matched
+        else:
+            dropped.add(clip_id)
+    for entry in mapping:
+        only, both = counts[entry["name"]]
+        _log(f"Abgleich {entry['name']!r}: EditShare {only + both}, Veritone {len(veritone[entry['name']])}, "
+             f"Schnittmenge {both}.")
+    return kept, dropped
 
 
 # --------- FUNC: PROXY FILES ---------
@@ -1033,8 +1153,10 @@ def _save_state(state: dict) -> None:
 
 
 # --------- FUNC: RECONCILE ---------
-def _classify(clip_id: str, hits: list[dict]) -> tuple[dict | None, dict | None]:
+def _classify(clip_id: str, hits: list[dict], dropped: set[str]) -> tuple[dict | None, dict | None]:
     """Return the usable hit or a problem with kind, reason and optional head/matches for format B."""
+    if not hits and clip_id in dropped:
+        return None, {"kind": "veritone", "reason": "In der EditShare-Suche, aber nicht bei Veritone in derselben Kollektion"}
     if not hits:
         return None, {"kind": "missing", "reason": "Nicht mehr in der Suche gefunden (Metadaten nicht abrufbar oder Kollektion geändert)"}
     if len(hits) > 1:
@@ -1106,10 +1228,10 @@ def _changes(clip: dict, hit: dict) -> str:
     return "; ".join(f"{label}: {clip[key]!r} → {new[key]!r}" for key, label in tracked_fields.items() if clip[key] != new[key])
 
 
-def _reconcile(state: dict, found: dict[str, list[dict]], ctx: dict) -> None:
+def _reconcile(state: dict, found: dict[str, list[dict]], ctx: dict, dropped: set[str] = frozenset()) -> None:
     """Admit new clips; for clips already in the JSON differences are only reported, the JSON stays the index."""
     clips = state["clips"]
-    classified = {clip_id: _classify(clip_id, found.get(clip_id, [])) for clip_id in {*found, *clips}}
+    classified = {clip_id: _classify(clip_id, found.get(clip_id, []), dropped) for clip_id in {*found, *clips}}
     groups, sources = defaultdict(list), {}
     for clip_id, (hit, _) in classified.items():
         source = clips.get(clip_id) or hit
@@ -1744,7 +1866,8 @@ def _update_index() -> None:
     _check_root()
     state, ctx = _load_state(), _context()
     before = len(state["clips"])
-    _reconcile(state, _search_clips(mapping, ctx), ctx)
+    found, dropped = _intersect(_search_clips(mapping, ctx), _veritone_clip_ids(mapping), mapping)
+    _reconcile(state, found, ctx, dropped)
     index_issues = [item for item in ctx["issues"] if item["section"] in index_sections]
     state["index"] = {"updated_at": _now(), "issues": index_issues}
     _keep_notes(state, ctx["issues"])
