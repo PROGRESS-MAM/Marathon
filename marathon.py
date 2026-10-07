@@ -55,6 +55,7 @@ issue_sections = {
     "skipped": "Gefunden, aber nicht aufgenommen (letzter update-index, nicht in Gesamt)",
     "deviation": "Suche weicht von der JSON ab (letzter update-index, nicht übernommen)",
     "veritone_only": "Nur bei Veritone gefunden (letzter update-index, nicht in Gesamt)",
+    "ffe_missing": "FFE-Titel nicht in der JSON (letzter FFE-Abgleich)",
     "inactive": "In der JSON, aber nicht aktiv (nicht in Gesamt)",
     "final": "Auffällige Clip-Dateien in finalen Ablageordnern",
     "note": "Hinweise (betroffene Clips zählen weiter)",
@@ -83,7 +84,8 @@ commands_help = {
     "auto-report-off": "Täglichen Auto-Bericht ausschalten",
     "report": "Manuellen Bericht sofort erstellen",
     "create-folders": "Ordnerstruktur aller Kollektionen anlegen",
-    "update-index": "Neue Suche (EditShare ∩ Veritone); neue Clips aufnehmen, Abweichungen in die Index-Fehlerliste",
+    "update-index": "Neue Suche (EditShare ∩ Veritone); neue Clips aufnehmen, Abweichungen in die Index-Fehlerliste; FFE-Abgleich",
+    "update-ffe": "Nur FFE-Liste mit der bestehenden JSON abgleichen (FFE-Tafel neu setzen), ohne Suche",
     "delete-folder": "SMB-Arbeitsordner bereinigen; Index behalten, Prozesszustand neu aufbauen",
     "status": "Anzeigen, was eingeschaltet ist",
     "help": "Diese Übersicht",
@@ -100,10 +102,17 @@ veritone_settle_seconds = 30  # Wait between triggering a search and reading its
 tracked_fields = {"collection": "Kollektion", "identifier": field_names["identifier"], "title": field_names["title"],
                   "clip_name_with_extension": field_names["clip_name"], "master_files": field_names["userpath"],
                   "filehashes": field_names["hash"]}
+ffe_flag = "FFE-Tafel"
+ffe_missing = "Kein Clip mit genau dieser defa_id und diesem title"
+ffe_ambiguous = "Mehrere Clips mit genau dieser defa_id und diesem title"
+ffe_ambiguous_sections = {"ffe_ambiguous": "FFE-Titel uneindeutig (letzter FFE-Abgleich, nicht markiert)"}
+ffe_share_keys = ("reference_image", "reference_clip_dir")  # Names on the share; a change needs a restart like [paths].
+ffe_clip_suffix = ".mov"  # Only these files in reference_clip_dir count as FFE title clips.
+ffe_mtime_tolerance = 2  # Seconds; SMB servers may store modification times with reduced precision.
 
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "1.5.0"
+app_version = "1.6.0"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 log_dir = project_dir / "log"
@@ -122,6 +131,7 @@ config_schema = {  # section: {key: kind}; all values and their explanations liv
     "limits": {key: "count" for key in limit_keys.values()},
     "heartbeat": {"worker_timeout_minutes": "number", "max_job_hours": "number"},
     "veritone": {"base_url": "text", "token_file": "text", "field_clip_id": "text"},
+    "ffe": {"list_file": "text", "reference_image": "name", "reference_clip_dir": "name"},
 }
 
 # --------- INIT ---------
@@ -194,9 +204,16 @@ def _read_config() -> dict:
                 values[key] = _parse_value(kind, parser.get(section, key, fallback="").strip())
             except ValueError as exc:
                 problems.append(f"[{section}] {key}: {exc}")
-    for section, key in (("paths", "mapping_file"), ("paths", "cred_file"), ("veritone", "token_file")):
+    for section, key in (("paths", "mapping_file"), ("paths", "cred_file"), ("veritone", "token_file"),
+                         ("ffe", "list_file")):
         if key in values and not (res_dir / values[key]).is_file():
             problems.append(f"[{section}] {key}: Datei {res_dir / values[key]} fehlt")
+    if "reference_clip_dir" in values:
+        folder = res_dir / values["reference_clip_dir"]
+        if not folder.is_dir() or not any(_is_clip(path) for path in folder.iterdir()):
+            problems.append(f"[ffe] reference_clip_dir: Ordner {folder} fehlt oder enthält keine {ffe_clip_suffix}-Dateien")
+        elif "reference_image" in values and not (folder / values["reference_image"]).is_file():
+            problems.append(f"[ffe] reference_image: Datei {folder / values['reference_image']} fehlt")
     if problems:
         raise ValueError("; ".join(problems))
     return values
@@ -210,9 +227,9 @@ def _load_config() -> str | None:
         return f"{config_path} fehlt – Marathon pausiert, bis die Datei vorhanden ist."
     except (OSError, UnicodeError, configparser.Error, ValueError) as exc:
         return f"{config_path.name} fehlerhaft – Marathon pausiert, bis sie korrigiert ist: {exc}"
-    changed = [key for key in config_schema["paths"] if cfg and values[key] != cfg[key]]
+    changed = [key for key in (*config_schema["paths"], *ffe_share_keys) if cfg and values[key] != cfg[key]]
     if changed:
-        return (f"Änderung in [paths] ({', '.join(changed)}) – Marathon pausiert; "
+        return (f"Änderung in [paths]/[ffe] ({', '.join(changed)}) – Marathon pausiert; "
                 f"Neustart nötig oder Änderung zurücknehmen.")
     cfg.update(values)
     return None
@@ -694,7 +711,7 @@ def _busy_workers(entries: dict[str, tuple[str, int, int]]) -> list[str]:
             job_id = Path(parts[-1]).stem
             if Path(parts[-1]).suffix.casefold() == ".json" and ("/".join(parts[:pos]), job_id) not in finished:
                 problems.append(f"Laufender/ungeklärter Job: {relative}")
-        if len(parts) == 3 and parts[:2] == [cfg["work_dir"], worker_dir]:
+        if len(parts) == 3 and parts[:2] == [cfg["work_dir"], worker_dir] and parts[2].casefold().endswith(".json"):
             try:
                 data = json.loads(_path(relative).read_text(encoding="utf-8"))
                 if not isinstance(data, dict) or "job_id" not in data:
@@ -718,10 +735,10 @@ def _cleanup_plan() -> dict:
         raise RuntimeError("Bereinigung blockiert. Worker zuerst beenden und laufende Jobs klären.\n" + "\n".join(busy))
     clips = [relative for relative, (kind, _, _) in entries.items() if kind == "file" and
              Path(relative).suffix.casefold() not in protocol_suffixes and
-             Path(relative).name.casefold() not in system_files]
+             Path(relative).name.casefold() not in system_files and not _is_reference(relative)]
     # A .part/.tmp may itself contain media. Never delete it without a confirmation.
     clips += [relative for relative, (kind, _, _) in entries.items() if kind == "file" and
-              Path(relative).suffix.casefold() in busy_suffixes]
+              Path(relative).suffix.casefold() in busy_suffixes and not _is_reference(relative)]
     fingerprint = hashlib.sha256(state_path.read_bytes()).hexdigest() if state_path.exists() else None
     return {"roots": roots, "entries": entries, "clips": sorted(set(clips)), "state_hash": fingerprint}
 
@@ -802,7 +819,8 @@ def _delete_folders(plan: dict) -> None:
     if errors:
         raise RuntimeError("Bereinigung unvollständig; Job-Schleife bleibt aus.\n" + "\n".join(errors))
     _log(f"Bereinigung abgeschlossen: {len(plan['roots'])} Arbeitsordner entfernt. "
-         "Finale Dateien erhalten; Index behalten; Job-Schleife bleibt aus.")
+         "Finale Dateien erhalten; Index behalten; Job-Schleife bleibt aus. "
+         "FFE-Referenzen werden bei 'run' oder 'create-folders' neu abgelegt.")
 
 
 def _begin_delete() -> dict | None:
@@ -892,6 +910,162 @@ def _priority(mapping: list[dict], state: dict, ctx: dict) -> dict[str, list[str
         _issue(ctx, "note", "Prioliste ungültig – letzte gültige Reihenfolge gilt", "priority", str(exc))
     order = [entry["name"] for entry in mapping]
     return {stage: [*explicit[stage], *(name for name in order if name not in explicit[stage])] for stage in stages}
+
+
+# --------- FUNC: FFE ---------
+def _reference_image() -> str:
+    return f"{cfg['work_dir']}/{worker_dir}/{cfg['reference_image']}"
+
+
+def _reference_clip_folder() -> str:
+    return f"{cfg['work_dir']}/{worker_dir}/{cfg['reference_clip_dir']}"
+
+
+def _is_reference(relative: str) -> bool:
+    key = relative.casefold()
+    return key == _reference_image().casefold() or key.rsplit("/", 1)[0] == _reference_clip_folder().casefold()
+
+
+def _is_clip(path: Path) -> bool:
+    return path.is_file() and path.suffix.casefold() == ffe_clip_suffix and not _ignored(path.name)
+
+
+def _local_image() -> Path:
+    return _res("reference_clip_dir") / cfg["reference_image"]
+
+
+def _local_clips() -> list[Path]:
+    return sorted((path for path in _res("reference_clip_dir").iterdir() if _is_clip(path)),
+                  key=lambda path: path.name.casefold())
+
+
+def _reference_clips() -> list[str]:
+    return [f"{_reference_clip_folder()}/{path.name}" for path in _local_clips()]
+
+
+def _sync_references(ctx: dict) -> int:
+    """Mirror screenshot and clip folder from res into the worker folder; returns copied plus removed files."""
+    pairs = [(_local_image(), _reference_image()),
+             *((path, f"{_reference_clip_folder()}/{path.name}") for path in _local_clips())]
+    changed = 0
+    for source, relative in pairs:
+        target, info = _safe_work_path(relative), source.stat()
+        try:
+            current = target.stat()
+            if current.st_size == info.st_size and abs(current.st_mtime - info.st_mtime) <= ffe_mtime_tolerance:
+                continue
+        except FileNotFoundError:
+            pass
+        temporary = target.with_name(f".{target.name}.tmp")
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, temporary)  # Keeps the modification time for the next comparison.
+            if temporary.stat().st_size != info.st_size:
+                raise OSError("Dateigröße nach dem Kopieren abweichend")
+            os.replace(temporary, target)
+        except OSError as exc:
+            _issue(ctx, "note", "FFE-Referenz nicht bereitgestellt (neuer Versuch im nächsten Zyklus)", relative,
+                   f"{relative}: {exc}")
+            continue
+        finally:
+            temporary.unlink(missing_ok=True)
+        changed += 1
+        _log(f"FFE-Referenz bereitgestellt: {relative}")
+    expected = {Path(relative).name.casefold() for _, relative in pairs[1:]}
+    for key, (name, _) in _scan(_reference_clip_folder()).items():
+        if key in expected or _ignored(name):
+            continue
+        relative = f"{_reference_clip_folder()}/{name}"
+        try:
+            _safe_work_path(relative).unlink()
+        except OSError as exc:
+            _issue(ctx, "note", "Veraltete FFE-Referenz nicht löschbar", relative, f"{relative}: {exc}")
+            continue
+        changed += 1
+        _log(f"Veraltete FFE-Referenz entfernt: {relative}")
+    return changed
+
+
+def _load_ffe_list() -> list[dict]:
+    with _res("list_file").open(encoding="utf-8-sig") as handle:
+        document = json.load(handle)
+    entries = document.get("titel") if isinstance(document, dict) else None
+    if not isinstance(entries, list):
+        raise ValueError(f"{cfg['list_file']}: erwartet ein Objekt mit der Liste \"titel\"; keine Änderung.")
+    problems = [f"Eintrag {number}: {entry!r}" for number, entry in enumerate(entries, 1)
+                if not isinstance(entry, dict) or set(entry) != {"title", "defa_id"}
+                or not all(isinstance(value, str) and value.strip() for value in entry.values())]
+    if problems:
+        more = f"; … {len(problems) - 5} weitere" if len(problems) > 5 else ""
+        raise ValueError(f"{cfg['list_file']}: {len(problems)} ungültige Einträge (erwartet genau title und defa_id); "
+                         f"keine Änderung: {'; '.join(problems[:5])}{more}")
+    return entries
+
+
+def _exact(value: str) -> str:
+    return unicodedata.normalize("NFC", value)  # Same visible text, but composed umlauts.
+
+
+def _apply_ffe(state: dict, entries: list[dict], ctx: dict) -> dict:
+    """Recompute FFE-Tafel for all clips; only a single clip with identical defa_id and title is marked."""
+    exact, loose = defaultdict(list), defaultdict(list)
+    for clip in sorted(state["clips"].values(), key=lambda item: int(item["clip_id"])):
+        exact[(_exact(clip["identifier"]), _exact(clip["title"]))].append(clip)
+        loose[(_normalize(clip["identifier"]), _normalize(clip["title"]))].append(clip)
+    keys = list(dict.fromkeys((_exact(entry["defa_id"]), _exact(entry["title"])) for entry in entries))
+    marked, counts = set(), {"entries": len(entries), "unique": len(keys), "marked": 0, "missing": 0, "ambiguous": 0}
+    for defa_id, title in keys:
+        hits, head, key = exact.get((defa_id, title), []), f"defa_id={defa_id}, title={title}", f"{defa_id}|{title}"
+        if len(hits) == 1:
+            marked.add(hits[0]["clip_id"])
+            counts["marked"] += 1
+        elif hits:
+            counts["ambiguous"] += 1
+            _issue(ctx, "ffe_ambiguous", ffe_ambiguous, key, _detail(head, matches=[_clip_text(clip) for clip in hits]))
+        else:
+            counts["missing"] += 1
+            similar = [_clip_text(clip) for clip in loose.get((_normalize(defa_id), _normalize(title)), [])]
+            _issue(ctx, "ffe_missing", ffe_missing, key,
+                   _detail(f"{head}; ähnliche Schreibweise in der JSON", matches=similar) if similar else head)
+    counts["changed"] = 0
+    for clip in state["clips"].values():
+        flag = clip["clip_id"] in marked
+        if clip[ffe_flag] != flag:
+            clip[ffe_flag] = flag
+            counts["changed"] += 1
+            _event(clip, f"{ffe_flag} gesetzt" if flag else f"{ffe_flag} entfernt")
+    return counts
+
+
+def _ffe_text(counts: dict) -> str:
+    return (f"FFE {counts['entries']} Einträge ({counts['unique']} verschieden): {counts['marked']} markiert, "
+            f"{counts['missing']} nicht gefunden, {counts['ambiguous']} uneindeutig; {counts['changed']} Clips geändert")
+
+
+def _write_lists(issues: list[dict], when: datetime, name: str, title: str) -> tuple[str | None, str | None]:
+    """Write the general error list and the separate list of ambiguous FFE entries; returns the file names."""
+    general = [item for item in issues if item["section"] not in ffe_ambiguous_sections]
+    ambiguous = [item for item in issues if item["section"] in ffe_ambiguous_sections]
+    files = []
+    for items, suffix, heading, sections in ((general, "errors", title, issue_sections),
+                                             (ambiguous, "ffe_uneindeutig", "FFE uneindeutig", ffe_ambiguous_sections)):
+        file = f"{name}_{suffix}.txt" if items else None
+        if file:
+            _write_new(error_dir / file, _format_errors(items, when, heading, sections))
+        files.append(file)
+    return files[0], files[1]
+
+
+def _details(*files: str | None) -> str:
+    names = [f"errors/{name}" for name in files if name]
+    return f"; Details: {', '.join(names)}" if names else ""
+
+
+def _ffe_line(ffe: dict) -> str:
+    """Summary of the last FFE match for the report."""
+    counts = ffe.get("counts") or {}
+    text = f"FFE-Stand: {ffe.get('updated_at') or 'unbekannt'}" + (f"; {_ffe_text(counts)}" if counts else "")
+    return text + _details(ffe.get("error_list"), ffe.get("ambiguous_list"))
 
 
 # --------- FUNC: SEARCH ---------
@@ -1199,15 +1373,15 @@ def _lookup(ctx: dict, folder: str, identifier: str, title: str) -> list[str]:
 
 # --------- FUNC: STATE ---------
 def _empty_state() -> dict:
-    return {"schema_version": 5, "priority": None, "notes": [], "index": {"updated_at": None, "counts": {}, "error_list": None},
-            "workers": {}, "clips": {}}
+    return {"schema_version": 6, "priority": None, "notes": [], "index": {"updated_at": None, "counts": {}, "error_list": None},
+            "ffe": {"updated_at": None, "counts": {}, "error_list": None, "ambiguous_list": None}, "workers": {}, "clips": {}}
 
 
 def _clip_problem(clip_id: str, clip) -> str | None:
     if not isinstance(clip, dict) or clip.get("clip_id") != clip_id:
         return "Clip_ID passt nicht zum Eintrag"
-    if not all(isinstance(clip.get(key), bool) for key in ("active", "ready")):
-        return "active/ready fehlt"
+    if not all(isinstance(clip.get(key), bool) for key in ("active", "ready", ffe_flag)):
+        return f"active/ready/{ffe_flag} fehlt"
     if clip.get("stage") not in (*stages, None) or clip["ready"] != (clip["stage"] is None):
         return "Stufe passt nicht zu bereit"
     if not all(isinstance(clip.get(key), kind) for key, kind in (("history", list), ("files", dict), ("issues", dict))):
@@ -1224,7 +1398,8 @@ def _load_state() -> dict:
         return _empty_state()
     with state_path.open(encoding="utf-8") as handle:
         state = json.load(handle)
-    if not isinstance(state, dict) or state.get("schema_version") != 5 or not isinstance(state.get("clips"), dict):
+    if not isinstance(state, dict) or state.get("schema_version") != 6 or not isinstance(state.get("clips"), dict) or \
+            not isinstance(state.get("ffe"), dict):
         raise ValueError("Unbekanntes Zustandsformat; keine Aktualisierung.")
     for clip_id, clip in state["clips"].items():
         problem = _clip_problem(clip_id, clip)
@@ -1270,7 +1445,7 @@ def _classify(clip_id: str, hits: list[dict], dropped: dict[str, tuple[str, str]
 def _new_clip(clip_id: str, hit: dict) -> dict:
     return {"clip_id": clip_id, "collection": hit["collection"], "identifier": hit["identifier"],
             "title": hit["title"], "clip_name_with_extension": hit["clip_name"], "filehashes": hit["hashes"],
-            "master_files": hit["masters"], "lto_tapes": hit["lto_tapes"], "master_size": hit["master_size"], "status": "wartet", "active": True, "ready": False, "stage": "restore",
+            "master_files": hit["masters"], "lto_tapes": hit["lto_tapes"], "master_size": hit["master_size"], "status": "wartet", "active": True, "ready": False, ffe_flag: False, "stage": "restore",
             "queued_at": _stamp(), "preset": None, "job": None, "job_count": 0, "attempts": 0,
             "files": {"master": None, "proxy": None},
             "issues": {"file": None, "sticky": None}, "history": []}
@@ -1367,6 +1542,9 @@ def _reconcile(state: dict, found: dict[str, list[dict]], ctx: dict, dropped: di
 # - Leave the job file in laufend; write the report as <report_folder>/<job_id>.json via a temp name not ending
 #   in ".json": {"job_id": str, "status": "ok"|"failed"|"rejected" (QC only), "result": str (required unless ok),
 #   "preset": str|null}.
+# - FFE: every QC and Transcode job carries "FFE-Tafel" (bool). QC jobs name the reference screenshot in
+#   "ffe_reference_image", Transcode jobs list all FFE title clips in "ffe_reference_clips". Marathon keeps these
+#   files in <work_dir>/worker/; workers only read them and never write into that folder except their heartbeat.
 # - Marathon moves results on, archives job, report and output leftovers, deletes failed partial results and withdrawn jobs.
 def _read_workers(state: dict) -> None:
     folder, current = f"{cfg['work_dir']}/{worker_dir}", {}
@@ -1765,7 +1943,7 @@ def _leftovers(state: dict, mapping: list[dict], ctx: dict) -> None:
 
 def _job_payload(clip: dict, job_id: str, folder: str) -> dict:
     stage = clip["stage"]
-    payload = {"schema_version": 3, "job_id": job_id, "stage": stage_labels[stage], "clip_id": clip["clip_id"],
+    payload = {"schema_version": 4, "job_id": job_id, "stage": stage_labels[stage], "clip_id": clip["clip_id"],
                "collection": clip["collection"], "identifier": clip["identifier"], "title": clip["title"],
                "clip_name": clip["clip_name_with_extension"], "created_at": _now(),
                "report_folder": f"{folder}/fertig",
@@ -1774,9 +1952,11 @@ def _job_payload(clip: dict, job_id: str, folder: str) -> dict:
         payload.update(hashes=clip["filehashes"], files=clip["master_files"])
     elif stage == "transcode":
         master = clip["files"]["master"]
-        payload.update(inputs=[f"{master['folder']}/{name}" for name in master["names"]])
+        payload.update({ffe_flag: clip[ffe_flag], "ffe_reference_clips": _reference_clips(),
+                        "inputs": [f"{master['folder']}/{name}" for name in master["names"]]})
     else:
-        payload["input"] = f"{clip['files']['proxy']['folder']}/{clip['files']['proxy']['name']}"
+        payload.update({ffe_flag: clip[ffe_flag], "ffe_reference_image": _reference_image(),
+                        "input": f"{clip['files']['proxy']['folder']}/{clip['files']['proxy']['name']}"})
     return payload
 
 
@@ -1817,6 +1997,7 @@ def _process(state: dict, mapping: list[dict], prio: dict[str, list[str]], ctx: 
     _read_workers(state)
     if writing:
         _ensure_folders(mapping)
+        _sync_references(ctx)
         jobs = {clip["job"]["id"]: clip for clip in clips.values() if clip["job"]}
         folders = [_job_folder(stage) for stage in stages]
         for folder in folders:
@@ -1900,11 +2081,11 @@ def _render(kind: str, when: datetime, totals: dict, prio: dict[str, list[str]],
     return f"{app_name} {app_version} | {kind} | {when.isoformat(timespec='seconds')}\n\n" + "\n".join(table) + "\n"
 
 
-def _summary_lines(issues: list[dict]) -> list[str]:
+def _summary_lines(issues: list[dict], sections: dict[str, str] = issue_sections) -> list[str]:
     if not issues:
         return ["Keine Auffälligkeiten."]
     lines = []
-    for section, title in issue_sections.items():
+    for section, title in sections.items():
         categories = defaultdict(set)
         for item in issues:
             if item["section"] == section:
@@ -1913,15 +2094,17 @@ def _summary_lines(issues: list[dict]) -> list[str]:
             continue
         clips = {key for keys in categories.values() for key in keys}
         total = sum(map(len, categories.values())) if section == "note" else len(clips)
-        lines.append(f"{title}: {total}" + ("" if section == "note" else " Clips"))
+        unit = "" if section == "note" else " Einträge" if section.startswith("ffe_") else " Clips"
+        lines.append(f"{title}: {total}{unit}")
         lines += [f"  {category}: {len(keys)}" for category, keys in
                   sorted(categories.items(), key=lambda item: (-len(item[1]), item[0].casefold()))]
     return lines
 
 
-def _format_errors(issues: list[dict], when: datetime, title: str = "Fehlerbericht") -> str:
-    lines = [f"{app_name} {app_version} | {title} | {when.isoformat(timespec='seconds')}", "", *_summary_lines(issues)]
-    for section, heading in issue_sections.items():
+def _format_errors(issues: list[dict], when: datetime, title: str = "Fehlerbericht",
+                   sections: dict[str, str] = issue_sections) -> str:
+    lines = [f"{app_name} {app_version} | {title} | {when.isoformat(timespec='seconds')}", "", *_summary_lines(issues, sections)]
+    for section, heading in sections.items():
         grouped = defaultdict(list)
         for item in issues:
             if item["section"] == section:
@@ -1957,29 +2140,49 @@ def _keep_notes(state: dict, issues: list[dict]) -> None:
 
 # --------- FUNC: COMMANDS ---------
 def _update_index() -> None:
-    """Search all collections; admit new clips, report differences for known clips without changing them."""
+    """Search all collections; admit new clips, report differences for known clips without changing them; FFE match."""
     started = perf_counter()
     _log("Index-Aktualisierung gestartet.")
     mapping = _load_mapping()
+    entries = _load_ffe_list()  # Checked before the long search.
     _check_root()
     state, ctx = _load_state(), _context()
     before, token = len(state["clips"]), _veritone_token()
     found = _search_clips(mapping, ctx)
     found, dropped = _intersect(found, _veritone_clip_ids(mapping, token, ctx), mapping, ctx)
     _reconcile(state, found, ctx, dropped)
+    ffe_counts = _apply_ffe(state, entries, ctx)
     index_issues = [item for item in ctx["issues"] if item["section"] in index_sections]
     counts = {section: len({item["key"] for item in index_issues if item["section"] == section}) for section in index_sections}
     when = datetime.now().astimezone()
-    name = _file_stamp("index", when)
-    if ctx["issues"]:
-        _write_new(error_dir / f"{name}_errors.txt", _format_errors(ctx["issues"], when, "Index-Fehlerliste"))
-    state["index"] = {"updated_at": _now(), "counts": counts, "error_list": f"{name}_errors.txt" if ctx["issues"] else None}
+    error_list, ambiguous_list = _write_lists(ctx["issues"], when, _file_stamp("index", when), "Index-Fehlerliste")
+    state["index"] = {"updated_at": _now(), "counts": counts, "error_list": error_list}
+    state["ffe"] = {"updated_at": _now(), "counts": ffe_counts, "error_list": error_list if ffe_counts["missing"] else None,
+                    "ambiguous_list": ambiguous_list}
     _keep_notes(state, ctx["issues"])
     state["updated_at"] = _now()
     _save_state(state)
     _log(f"Index aktualisiert: {len(state['clips']) - before} Clips neu aufgenommen, {len(state['clips'])} in der JSON; "
          f"{counts['skipped']} nicht aufgenommen; {counts['deviation']} Abweichungen; {counts['veritone_only']} nur bei Veritone"
-         f"{f'; Details: errors/{name}_errors.txt' if ctx['issues'] else ''}; Dauer: {perf_counter() - started:.1f} s.")
+         f"; {_ffe_text(ffe_counts)}{_details(error_list, ambiguous_list)}; Dauer: {perf_counter() - started:.1f} s.")
+
+
+def _update_ffe() -> None:
+    """Match only the FFE list against the existing JSON; no search and no access to the share."""
+    started = perf_counter()
+    _log("FFE-Abgleich gestartet.")
+    if not state_path.exists():
+        raise RuntimeError("Noch keine JSON – zuerst 'update-index' oder 'run'.")
+    entries = _load_ffe_list()
+    state, ctx = _load_state(), _context()
+    counts = _apply_ffe(state, entries, ctx)
+    when = datetime.now().astimezone()
+    error_list, ambiguous_list = _write_lists(ctx["issues"], when, _file_stamp("ffe", when), "FFE-Fehlerliste")
+    state["ffe"] = {"updated_at": _now(), "counts": counts, "error_list": error_list, "ambiguous_list": ambiguous_list}
+    state["updated_at"] = _now()
+    _save_state(state)
+    _log(f"FFE-Abgleich abgeschlossen: {_ffe_text(counts)}{_details(error_list, ambiguous_list)}; "
+         f"Dauer: {perf_counter() - started:.1f} s.")
 
 
 def _index_line(index: dict) -> str:
@@ -2017,7 +2220,7 @@ def _report(kind: str) -> Path:
     when = datetime.now().astimezone()
     name = _file_stamp(kind, when)
     watch, workers = _watch_lines(view), _worker_lines(view)
-    text = _render(kind, when, totals, prio, previous) + f"\n{_index_line(state['index'])}\n\n"
+    text = _render(kind, when, totals, prio, previous) + f"\n{_index_line(state['index'])}\n{_ffe_line(state['ffe'])}\n\n"
     text += "\n".join(_final_lines(ctx)) + "\n\n"
     text += "\n".join(_summary_lines(ctx["issues"])) + "\n"
     text += f"\nAuffällige laufende Jobs: {len(watch)}\n" + "".join(f"{line}\n" for line in watch)
@@ -2055,8 +2258,12 @@ def _cycle() -> str | None:
 def _create_folders() -> None:
     mapping = _load_mapping()
     _check_root()
-    created = _ensure_folders(mapping, force=True)
-    _log(f"Ordnerstruktur für {len(mapping)} Kollektionen geprüft: {created} Ordner neu angelegt.")
+    created, ctx = _ensure_folders(mapping, force=True), _context()
+    copied = _sync_references(ctx)
+    _log(f"Ordnerstruktur für {len(mapping)} Kollektionen geprüft: {created} Ordner neu angelegt; "
+         f"FFE-Referenzen: {copied} Dateien aktualisiert.")
+    for item in ctx["issues"]:
+        _log(f"{item['category']}: {item['detail']}")
 
 
 def _start_run() -> None:
@@ -2188,6 +2395,8 @@ def main(argv: list[str] | None = None) -> None:
                 _create_folders()
             elif command == "delete-folder":
                 pending_delete = _begin_delete()
+            elif command == "update-ffe":
+                _update_ffe()
             else:
                 _update_index()
             if command in ("run", "auto-report"):
