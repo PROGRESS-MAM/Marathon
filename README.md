@@ -80,10 +80,10 @@ Aliase: `exit` = `quit`, `manual-report` = `report`, `auto-report-on` = `auto-re
 **Abgleich** (bei `update-index` und `update-ffe`):
 
 - Ein Eintrag trifft einen Clip, wenn `defa_id` genau dem Identifier und `title` genau dem Titel des Clips in der JSON entspricht (inklusive Groß-/Kleinschreibung und Zusätzen wie `__24fps`).
-- Genau ein Treffer: Der Clip bekommt `"FFE-Tafel": true`.
+- Genau ein Treffer: Der Clip bekommt `"ffe_tafel": true`.
 - Mehrere Treffer: kein Flag; Eintrag in `reports/errors/<index|ffe>_<stempel>_ffe_uneindeutig.txt`.
 - Kein Treffer: Eintrag in der allgemeinen Fehlerliste `reports/errors/<index|ffe>_<stempel>_errors.txt`, Abschnitt „FFE-Titel nicht in der JSON“. Gibt es einen Clip mit abweichender Schreibweise, steht er als Hinweis dabei.
-- Bei jedem Abgleich wird `FFE-Tafel` für alle Clips neu gesetzt: Clips ohne eindeutigen Treffer in der aktuellen Liste erhalten `false`.
+- Bei jedem Abgleich wird `ffe_tafel` für alle Clips neu gesetzt: Clips ohne eindeutigen Treffer in der aktuellen Liste erhalten `false`.
 - Ist die FFE-Liste ungültig, bricht der Befehl ab, ohne die JSON zu ändern (bei `update-index` vor der Suche).
 - Der Bericht zeigt den letzten Stand in der Zeile `FFE-Stand`.
 
@@ -98,9 +98,9 @@ Nach Änderungen an der FFE-Liste genügt `update-ffe`.
 
 | Job | Feld | Inhalt |
 | --- | --- | --- |
-| Transcode | `FFE-Tafel` | `true`/`false` |
+| Transcode | `ffe_tafel` | `true`/`false` |
 | Transcode | `ffe_reference_clips` | Liste aller FFE-Clips, z. B. `.marathon/worker/FFE Filmerbe/2K_2_35.mov` |
-| QC | `FFE-Tafel` | `true`/`false` |
+| QC | `ffe_tafel` | `true`/`false` |
 | QC | `ffe_reference_image` | `.marathon/worker/FFE-Filmerbe-DEFA-Titel_Tafel.png` |
 
 Maßgeblich ist der Wert beim Erstellen des Jobs.

@@ -85,7 +85,7 @@ commands_help = {
     "report": "Manuellen Bericht sofort erstellen",
     "create-folders": "Ordnerstruktur aller Kollektionen anlegen",
     "update-index": "Neue Suche (EditShare ∩ Veritone); neue Clips aufnehmen, Abweichungen in die Index-Fehlerliste; FFE-Abgleich",
-    "update-ffe": "Nur FFE-Liste mit der bestehenden JSON abgleichen (FFE-Tafel neu setzen), ohne Suche",
+    "update-ffe": "Nur FFE-Liste mit der bestehenden JSON abgleichen (ffe_tafel neu setzen), ohne Suche",
     "delete-folder": "SMB-Arbeitsordner bereinigen; Index behalten, Prozesszustand neu aufbauen",
     "status": "Anzeigen, was eingeschaltet ist",
     "help": "Diese Übersicht",
@@ -102,7 +102,7 @@ veritone_settle_seconds = 30  # Wait between triggering a search and reading its
 tracked_fields = {"collection": "Kollektion", "identifier": field_names["identifier"], "title": field_names["title"],
                   "clip_name_with_extension": field_names["clip_name"], "master_files": field_names["userpath"],
                   "filehashes": field_names["hash"]}
-ffe_flag = "FFE-Tafel"
+ffe_flag = "ffe_tafel"
 ffe_missing = "Kein Clip mit genau dieser defa_id und diesem title"
 ffe_ambiguous = "Mehrere Clips mit genau dieser defa_id und diesem title"
 ffe_ambiguous_sections = {"ffe_ambiguous": "FFE-Titel uneindeutig (letzter FFE-Abgleich, nicht markiert)"}
@@ -1007,7 +1007,7 @@ def _exact(value: str) -> str:
 
 
 def _apply_ffe(state: dict, entries: list[dict], ctx: dict) -> dict:
-    """Recompute FFE-Tafel for all clips; only a single clip with identical defa_id and title is marked."""
+    """Recompute ffe_tafel for all clips; only a single clip with identical defa_id and title is marked."""
     exact, loose = defaultdict(list), defaultdict(list)
     for clip in sorted(state["clips"].values(), key=lambda item: int(item["clip_id"])):
         exact[(_exact(clip["identifier"]), _exact(clip["title"]))].append(clip)
@@ -1542,7 +1542,7 @@ def _reconcile(state: dict, found: dict[str, list[dict]], ctx: dict, dropped: di
 # - Leave the job file in laufend; write the report as <report_folder>/<job_id>.json via a temp name not ending
 #   in ".json": {"job_id": str, "status": "ok"|"failed"|"rejected" (QC only), "result": str (required unless ok),
 #   "preset": str|null}.
-# - FFE: every QC and Transcode job carries "FFE-Tafel" (bool). QC jobs name the reference screenshot in
+# - FFE: every QC and Transcode job carries "ffe_tafel" (bool). QC jobs name the reference screenshot in
 #   "ffe_reference_image", Transcode jobs list all FFE title clips in "ffe_reference_clips". Marathon keeps these
 #   files in <work_dir>/worker/; workers only read them and never write into that folder except their heartbeat.
 # - Marathon moves results on, archives job, report and output leftovers, deletes failed partial results and withdrawn jobs.
