@@ -15,7 +15,8 @@ pip install "searcher[api] @ git+https://github.com/PROGRESS-MAM/ES-Search.git@m
 Projektordner:
 
 ~~~text
-marathon.py
+marathon.py                            Startdatei
+core/                                  Programmteile von Marathon
 res/
   config.ini                           Konfiguration (siehe unten)
   cred.env                             FLOW_HOST, FLOW_USER, FLOW_PASSWORD und vt_api_token=<Token>
@@ -26,6 +27,8 @@ res/
     FFE-Filmerbe-DEFA-Titel_Tafel.png  Referenz-Screenshot der FFE-Filmtafel
     *.mov                              alle FFE-Filmtafel-Clips, z. B. 2K_2_35.mov
 ~~~
+
+`marathon.py` und `core/` gehören immer zusammen: Bei einem Update beide vollständig ersetzen; `res/`, `log/`, `state/` und `reports/` bleiben unverändert.
 
 `log/`, `state/`, `reports/` und `reports/errors/` legt Marathon selbst an. Der Index liegt in `state/marathon.json` (JSON-Version 7).
 
