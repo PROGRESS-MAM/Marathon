@@ -15,6 +15,7 @@ from .state import load_state, save_state
 from .priority import priority
 from .ffe import ffe_line
 from .workers import watch_lines, worker_lines
+from .editshare import field_issue
 from .audit import final_audit, final_lines, leftovers
 from .jobs import process
 
@@ -104,6 +105,8 @@ def report(kind: str) -> Path:
     prio = priority(mapping, state, ctx)
     view = copy.deepcopy(state)  # The report only looks; jobs and moves stay with 'run'.
     process(view, mapping, prio, ctx, writing=False)
+    for clip in view["clips"].values():
+        field_issue(clip, ctx)
     ctx["listings"].clear()
     leftovers(view, mapping, ctx)
     final_audit(state, mapping, ctx)

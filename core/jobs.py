@@ -6,31 +6,34 @@ Worker rules (paths relative to the share root, "/" as separator):
 - Take the first *.json in <work_dir>/<stage>/offen (sorted by name) by renaming it into laufend/<worker>/;
   FileNotFoundError or PermissionError: another worker was faster or the job was withdrawn, try the next one.
 - Read inputs only where the job says; write results only into the job's output_folder.
-  Restore: all names from "files"; Transcode: exactly one proxy named exactly "proxy_name"; QC: never move the proxy.
+  Restore: all names from "files"; Transcode: exactly one proxy named exactly "proxy_name", optionally one new master
+  (repaired and/or with FFE title) named <identifier>__<title>.<suffix>; QC: never move the proxy.
 - Leave the job file in laufend; write the report as <report_folder>/<job_id>.json via a temp name not ending
   in ".json": {"job_id": str, "status": "ok"|"failed"|"rejected" (QC only), "result": str (required unless ok),
-  "preset": str|null}.
+  "preset": str|null, "new_master": str|null (Transcode only: file name of the new master)}.
 - FFE: every QC and Transcode job carries "ffe_tafel" (bool). QC jobs name the reference screenshot in
   "ffe_reference_image", Transcode jobs list all FFE title clips in "ffe_reference_clips". Marathon keeps these
   files in <work_dir>/worker/; workers only read them and never write into that folder except their heartbeat.
-- Marathon moves results on, archives job, report and output leftovers, deletes failed partial results and withdrawn jobs.
+- Marathon moves results on (a new master into master_dir, never overwriting), archives job, report and output
+  leftovers, deletes failed partial results and withdrawn jobs.
 """
 # --------- IMPORTS ---------
 import json
 from pathlib import Path
 
 from .constants import (
-    busy_suffixes, delivery_blocked, ffe_flag, ingest_source, job_failed, limit_keys, missing_job_grace, outbox,
-    protocol_suffixes, qc_rejected, stage_labels, stages)
-from .config import cfg
-from .util import age, clip_text, format_detail, issue, now, stamp
+    busy_suffixes, delivery_blocked, ffe_flag, ingest_source, invalid_path_chars, job_failed, limit_keys, master_blocked,
+    missing_job_grace, outbox, protocol_suffixes, qc_rejected, stage_labels, stages)
+from .config import cfg, ignored
+from .util import age, clip_text, file_name, format_detail, issue, normalize, now, stamp
 from .layout import final_folder, job_folder, join, master_folder, qc_inbox, share_path, stage_folder
 from .share import (
-    DeliveryBlocked, delete_job_file, deliver_proxy, ensure_folders, job_output, listing, move, output_archive,
-    remove_tree, rmdir, running, scan, subfolders, write_text_atomic)
+    DeliveryBlocked, MasterBlocked, delete_job_file, deliver_proxy, ensure_folders, job_output, listing, move,
+    output_archive, remove_tree, rmdir, running, scan, store_master, subfolders, write_text_atomic)
 from .state import add_event, enter, file_entry, set_issue
-from .naming import proxy_name
+from .naming import defa_id, proxy_name
 from .ffe import reference_clips, reference_image, sync_references
+from .editshare import request_field, write_fields
 from .workers import read_workers
 from .audit import check_files, report_problem, status, update_activity
 
@@ -60,6 +63,16 @@ def _finish_output(job: dict, keep: bool, ctx: dict) -> None:
     remove_tree(job["output_folder"], ctx, "Ausgang nicht löschbar (bleibt liegen)")
 
 
+def _master_problem(clip: dict, name: str, delivered: dict[str, str]) -> str | None:
+    """Reason why a reported new master cannot be taken over; None if it can."""
+    if file_name(name) != name or any(char in invalid_path_chars for char in name) or ignored(name) or \
+            name.casefold().endswith(protocol_suffixes) or normalize(defa_id(name) or "") != normalize(clip["identifier"]):
+        return f"Neuer Master {name!r} passt nicht zum Schema <DEFA-ID>__<Titel>.<Endung> mit DEFA-ID {clip['identifier']}"
+    if name.casefold() not in delivered:
+        return f"Neuer Master {name!r} fehlt im Transcode-Ausgang oder ist leer"
+    return None
+
+
 def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
     """Move the results of a successful job to the next stage; returns a problem text instead."""
     stage, out, collection = job["stage"], job["output_folder"], clip["collection"]
@@ -75,12 +88,19 @@ def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
                                    "last_seen_at": now()}
         enter(clip, "transcode")
     elif stage == "transcode":
-        proxies = [name for key, name in delivered.items() if not key.endswith(protocol_suffixes)]
+        new_master = str(report.get("new_master") or "").strip()
+        if new_master and (problem := _master_problem(clip, new_master, delivered)):
+            return problem
+        proxies = [name for key, name in delivered.items() if not key.endswith(protocol_suffixes) and key != new_master.casefold()]
         if len(proxies) != 1:
             return f"Transcode-Ausgang enthält {len(proxies)} Proxy-Dateien statt einer"
         name, expected = proxies[0], proxy_name(clip)
         if not expected or name.casefold() != expected.casefold():
             return f"Proxy-Name {name!r} statt {expected!r} (proxy_name im Job)"
+        if new_master:  # Not tracked further; master_dir belongs to the operator.
+            new_master = delivered[new_master.casefold()]
+            store_master(f"{out}/{new_master}", cfg["master_dir"], new_master)
+            add_event(clip, "Neuer Master abgelegt", join(cfg["master_dir"], new_master))
         move(f"{out}/{name}", qc_inbox(collection), expected, replace=True)
         clip["files"]["proxy"] = file_entry(qc_inbox(collection), expected, "Transcode")
         clip["preset"] = report.get("preset")
@@ -88,8 +108,8 @@ def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
     else:
         proxy, final = clip["files"]["proxy"], final_folder(collection)
         source = f"{proxy['folder']}/{proxy['name']}"
-        if not share_path(source).is_file():
-            return f"Proxy {source} vor der Auslieferung nicht mehr vorhanden"
+        if not share_path(source).is_file() or not share_path(source).stat().st_size:
+            return f"Proxy {source} vor der Auslieferung nicht vorhanden oder leer"
         deliver_proxy(source, final, proxy["name"])
         clip["files"]["proxy"] = file_entry(final, proxy["name"], "QC")
         master = clip["files"]["master"]
@@ -99,6 +119,7 @@ def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
                 master["deleted_at"] = now()
         clip.update(ready=True, stage=None)
         add_event(clip, "Bereit", f"{final}/{proxy['name']}")
+        request_field(clip, final, proxy["name"])
     return None
 
 
@@ -119,8 +140,9 @@ def _apply_report(clip: dict, job: dict, report: dict, worker: str | None, ctx: 
         try:
             problem = _take_outputs(clip, job, report, ctx)
         except DeliveryBlocked as exc:
-            set_issue(clip, "sticky", delivery_blocked, job_text(str(exc)))
-            add_event(clip, delivery_blocked, str(exc))
+            category = master_blocked if isinstance(exc, MasterBlocked) else delivery_blocked
+            set_issue(clip, "sticky", category, job_text(str(exc)))
+            add_event(clip, category, str(exc))
             _finish_output(job, True, ctx)
             return
         if problem is None:
@@ -299,6 +321,7 @@ def process(state: dict, mapping: list[dict], prio: dict[str, list[str]], ctx: d
         folders = [job_folder(stage) for stage in stages]
         for folder in folders:
             _collect_reports(folder, jobs, ctx)
+        write_fields(state)
         ctx["listings"].clear()  # Reports moved files around.
         for clip in clips.values():
             if clip["job"]:

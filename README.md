@@ -19,7 +19,7 @@ marathon.py                            Startdatei
 core/                                  Programmteile von Marathon
 res/
   config.ini                           Konfiguration (siehe unten)
-  cred.env                             FLOW_HOST, FLOW_USER, FLOW_PASSWORD und vt_api_token=<Token>
+  cred.env                             FLOW_HOST, FLOW_USER, FLOW_PASSWORD (Suche, EditShare-Feld) und vt_api_token=<Token>
   collections.json                     Kollektionsmapping
   priority.txt                         Prioliste (wird beim ersten Lauf als Vorlage angelegt)
   FFE Filmerbe/
@@ -102,7 +102,7 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 - Ist die FFE-Liste ungültig, bricht der Befehl ab, ohne die JSON zu ändern (bei `update-index` vor der Suche).
 - Der Bericht zeigt den letzten Stand in der Zeile `FFE-Stand`.
 
-Nach Änderungen an der FFE-Liste genügt `update-ffe`.
+Nach Änderungen an der FFE-Liste genügt `update-ffe`. Nach `update-index` ist kein eigenes `update-ffe` nötig: Der FFE-Abgleich läuft dort immer automatisch mit.
 
 **Referenzdateien für Worker:**
 
@@ -122,6 +122,46 @@ Nach Änderungen an der FFE-Liste genügt `update-ffe`.
 
 Maßgeblich ist der Wert beim Erstellen des Jobs.
 
+## Worker-Ergebnis und Auslieferung
+
+**Transcode-Ausgang** (Ordner `output_folder` des Jobs):
+
+- genau ein Proxy mit dem Namen aus `proxy_name`,
+- optional ein neuer Master (repariert und/oder mit FFE-Tafel) mit dem Namen `<DEFA-ID>__<Titel>.<Endung>`; die DEFA-ID muss dem Identifier des Clips entsprechen,
+- Protokolldateien (`.json`, `.txt`, `.log`) sind erlaubt.
+
+**Report** (`<report_folder>/<job_id>.json`):
+
+~~~json
+{ "job_id": "...", "status": "ok", "result": "", "preset": "...", "new_master": "DEFA14097__Rosa Luxemburg.mov" }
+~~~
+
+`new_master` nur bei Transcode und nur, wenn ein neuer Master im Ausgang liegt, sonst `null` oder weglassen.
+
+**Prüfung nach Transcode:**
+
+- Proxy und gemeldeter neuer Master müssen vorhanden und größer als 0 Byte sein, Namen wie oben. Sonst gilt der Job als fehlgeschlagen: Teilergebnisse werden gelöscht, neuer Versuch bis `max_job_attempts`. Eine nicht gemeldete zweite Mediendatei zählt als zweiter Proxy und lässt den Job ebenfalls fehlschlagen.
+- Der neue Master wird nach `[ingest] master_dir` verschoben, nie überschrieben. Bei Namenskonflikt oder wenn das Verschieben nicht möglich ist, wird der Clip inaktiv (`Neuer Master blockiert`), der Ausgang archiviert, nichts gelöscht.
+- Danach verfolgt Marathon den neuen Master nicht weiter (nur History `Neuer Master abgelegt`); `delete-folder` ordnet ihn nicht wieder zu.
+
+**Nach QC:**
+
+| QC | Proxy | Master aus Restore | Neuer Master in `master_dir` | EditShare-Feld |
+| --- | --- | --- | --- | --- |
+| bestanden | in den Zielordner | sofort gelöscht | bleibt | wird gesetzt |
+| nicht bestanden | bleibt im QC-Eingang | bleibt | bleibt | – |
+
+- Reihenfolge bei bestandenem QC: Proxy ausliefern, Master aus Restore löschen, EditShare-Feld setzen. Masterdateien aus `ingest-master` werden nie gelöscht.
+- Vor der Auslieferung muss der Proxy vorhanden und größer als 0 Byte sein.
+- QC nicht bestanden: Clip inaktiv (`QC nicht bestanden`), Eintrag in der Fehlerliste des Berichts.
+
+**EditShare-Feld:**
+
+- Nach jeder Auslieferung (auch nach `ingest-proxy`) setzt Marathon im selben Job-Zyklus das Custom-Feld `39d 10 Mbit Proxy Path` des Clips auf den Pfad des ausgelieferten Proxys, z. B. `\\10.0.77.11\Ablage KI Proxy_1\Proxy 10 Mbit\DEFA\1234567_98765_10Mbit.mp4`.
+- Zugang über `cred_file`; der FLOW-Benutzer braucht Schreibrecht auf das Feld.
+- Scheitert das Setzen, bleibt eine offene Aufgabe in der JSON (`editshare`), und Marathon versucht es in jedem Job-Zyklus erneut. Ab 3 gescheiterten Zyklen steht der Clip im Bericht unter „EditShare-Feld nicht gesetzt“; er zählt weiter als bereit.
+- Proxys, die vor Version 1.10.0 ausgeliefert wurden, bekommen das Feld nicht nachträglich.
+
 ## Ingest (vorhandene Master und Proxys)
 
 ~~~bash
@@ -138,7 +178,7 @@ python marathon.py ingest-proxy    # oder direkt beim Start
 
 ### `ingest-master`
 
-**Masterordner** (`[ingest] master_dir`, vollständiger Pfad), Namensschema `<DEFA-ID>__<Titel>.<Endung>`, z. B. `DEFA14097__Rosa Luxemburg - Stationen ihres Lebens.mov`.
+**Masterordner** (`[ingest] master_dir`, vollständiger Pfad), Namensschema `<DEFA-ID>__<Titel>.<Endung>`, z. B. `DEFA14097__Rosa Luxemburg - Stationen ihres Lebens.mov`. Hier legt Marathon auch neue Master aus Transcode ab; für deren Clips meldet `ingest-master` nur den Hinweis `Clip nicht mehr im Restore` und ändert nichts.
 
 **Eintrag** – bei genau einer Masterdatei und genau einem Clip in `Queue Restore`:
 
@@ -234,7 +274,7 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 | ffe | list_file | FFE-Liste, Pfad relativ zum res-Ordner |
 | ffe | reference_image | Referenz-Screenshot im Ordner `reference_clip_dir`; Name auch auf dem SMB |
 | ffe | reference_clip_dir | Ordner im res-Ordner mit allen FFE-Filmtafel-Clips; nur `.mov` zählen als Clips, mindestens einer nötig; Name auch auf dem SMB |
-| ingest | master_dir | Ordner mit vorhandenen Masterdateien `<DEFA-ID>__<Titel>.<Endung>` (vollständiger Pfad); nur `ingest-master` liest ihn |
+| ingest | master_dir | Ordner mit Masterdateien `<DEFA-ID>__<Titel>.<Endung>` (vollständiger Pfad, gleiches Netzlaufwerk wie `root_path`); `ingest-master` liest ihn, neue Master aus Transcode legt Marathon hier ab (ohne Überschreiben) |
 | ingest | proxy_dir | Ordner mit vorhandenen Proxys `<proxy_prefix>__<DEFA-ID>__<Titel>.mp4` (vollständiger Pfad, gleiches Netzlaufwerk wie `root_path`); nur `ingest-proxy` liest ihn |
 | ingest | proxy_prefix | Namensanfang der Proxys in `proxy_dir` (ohne das folgende `__`), z. B. `(c)PROGRESS__10Mbit` |
 

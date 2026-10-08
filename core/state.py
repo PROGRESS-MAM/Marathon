@@ -68,6 +68,10 @@ def _clip_problem(clip_id: str, clip) -> str | None:
     keys = ("id", "stage", "folder", "file", "output_folder", "state")
     if job is not None and (not isinstance(job, dict) or not all(isinstance(job.get(key), str) for key in keys)):
         return "Job-Eintrag unvollständig"
+    task = clip.get("editshare")
+    if task is not None and (not isinstance(task, dict) or not isinstance(task.get("pending"), bool) or
+                             not isinstance(task.get("value"), str) or type(task.get("attempts")) is not int):
+        return "EditShare-Eintrag unvollständig"
     return None
 
 

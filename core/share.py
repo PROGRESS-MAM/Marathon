@@ -162,6 +162,10 @@ class DeliveryBlocked(Exception):
     """Raised when a proxy cannot be delivered safely; proxy and master stay in place."""
 
 
+class MasterBlocked(DeliveryBlocked):
+    """Raised when a new master cannot be stored safely in master_dir; nothing is deleted."""
+
+
 def _is_link(path: Path) -> bool:
     info = path.lstat()
     return stat.S_ISLNK(info.st_mode) or bool(getattr(info, "st_file_attributes", 0) & 0x400)
@@ -186,14 +190,14 @@ def safe_work_path(relative: str) -> Path:
     return path
 
 
-def deliver_proxy(relative: str, final: str, name: str) -> None:
-    """Deliver without overwriting final files, even when a file arrives after the existence check."""
+def _place(relative: str, folder: str, name: str, blocked: type[DeliveryBlocked], keep: str) -> None:
+    """Move a work file into folder without overwriting, even when a file arrives after the existence check."""
     source = safe_work_path(relative)
-    target = share_path(final) / name
+    target = share_path(folder) / name
     if file_name(name) != name or any(c in invalid_path_chars for c in name):
-        raise DeliveryBlocked(f"Unsicherer Proxy-Dateiname: {name!r}; Proxy und Master bleiben erhalten")
-    if any(key == name.casefold() for key in scan(final)) or os.path.lexists(target):
-        raise DeliveryBlocked(f"Namenskonflikt: {target}; neuer Proxy={source}; Proxy und Master bleiben erhalten")
+        raise blocked(f"Unsicherer Dateiname: {name!r}; {keep}")
+    if any(key == name.casefold() for key in scan(folder)) or os.path.lexists(target):
+        raise blocked(f"Namenskonflikt: {target}; neue Datei={source}; {keep}")
     try:
         if os.name == "nt":
             os.rename(source, target)  # Windows refuses an existing target.
@@ -204,14 +208,24 @@ def deliver_proxy(relative: str, final: str, name: str) -> None:
                 writer.flush()
                 os.fsync(writer.fileno())
             if source.stat().st_size != size or target.stat().st_size != size:
-                raise DeliveryBlocked(f"Dateigröße bei Auslieferung nach {target} geändert; Quelldatei und Master bleiben erhalten")
+                raise blocked(f"Dateigröße beim Verschieben nach {target} geändert; Quelldatei bleibt erhalten; {keep}")
             source.unlink()
     except FileExistsError:
-        raise DeliveryBlocked(f"Namenskonflikt: {target}; Proxy und Master bleiben erhalten") from None
+        raise blocked(f"Namenskonflikt: {target}; {keep}") from None
     except OSError as exc:
-        raise DeliveryBlocked(f"Auslieferung nach {target} nicht möglich: {exc}; Master bleibt erhalten") from exc
+        raise blocked(f"Verschieben nach {target} nicht möglich: {exc}; {keep}") from exc
     if not target.is_file() or target.stat().st_size == 0:
-        raise DeliveryBlocked(f"Auslieferung nach {target} konnte nicht bestätigt werden; Master bleibt erhalten")
+        raise blocked(f"Verschieben nach {target} konnte nicht bestätigt werden; {keep}")
+
+
+def deliver_proxy(relative: str, final: str, name: str) -> None:
+    """Deliver a proxy into its final folder; raises DeliveryBlocked instead of overwriting."""
+    _place(relative, final, name, DeliveryBlocked, "Proxy und Master bleiben erhalten")
+
+
+def store_master(relative: str, folder: str, name: str) -> None:
+    """Move a new master from Transcode into master_dir; raises MasterBlocked instead of overwriting."""
+    _place(relative, folder, name, MasterBlocked, "Ausgang wird archiviert, nichts gelöscht")
 
 
 def work_inventory(roots: list[str]) -> dict[str, tuple[str, int, int]]:

@@ -33,6 +33,7 @@ summary_name = "Summe"
 match_separator = "———"
 invalid_path_chars = frozenset('<>:"/\\|?*' + "".join(map(chr, range(32))))
 reserved_names = frozenset({"CON", "PRN", "AUX", "NUL", *(f"{kind}{number}" for kind in ("COM", "LPT") for number in range(1, 10))})
+editshare_field, editshare_attempts = "39d 10 Mbit Proxy Path", 3  # Field for the delivered proxy path; failed cycles until reported.
 issue_sections = {
     "skipped": "Gefunden, aber nicht aufgenommen (letzter update-index, nicht in Gesamt)",
     "deviation": "Suche weicht von der JSON ab (letzter update-index, nicht übernommen)",
@@ -41,6 +42,7 @@ issue_sections = {
     "ffe_missing": "FFE-Titel nicht in der JSON (letzter FFE-Abgleich)",
     "inactive": "In der JSON, aber nicht aktiv (nicht in Gesamt)",
     "final": "Auffällige Clip-Dateien in finalen Ablageordnern",
+    "editshare": f"EditShare-Feld nicht gesetzt (ab {editshare_attempts} gescheiterten Job-Zyklen; wird weiter versucht, Clip zählt als bereit)",
     "note": "Hinweise (betroffene Clips zählen weiter)",
 }
 index_sections = ("skipped", "deviation", "veritone_only", "veritone_multi")
@@ -61,7 +63,8 @@ veritone_unmatched, barcode_missing = "Kein passender Clip in der EditShare-Such
 lost_proxy, lost_master = "Verloren – Proxy fehlt", "Verloren – Master fehlt vor Transcode"
 qc_rejected, job_failed = "QC nicht bestanden", "Job endgültig fehlgeschlagen"
 delivery_blocked, assignment_unclear = "Auslieferung blockiert", "Zuordnung beim Neuaufbau unklar"
-status_codes = {delivery_blocked: "auslieferung_blockiert", assignment_unclear: "zuordnung_ungeklaert", lost_proxy: "verloren", lost_master: "verloren", qc_rejected: "qc_abgelehnt", job_failed: "fehlgeschlagen"}
+master_blocked, editshare_failed = "Neuer Master blockiert", "EditShare-Feld nicht gesetzt"
+status_codes = {delivery_blocked: "auslieferung_blockiert", master_blocked: "master_blockiert", assignment_unclear: "zuordnung_ungeklaert", lost_proxy: "verloren", lost_master: "verloren", qc_rejected: "qc_abgelehnt", job_failed: "fehlgeschlagen"}
 commands_help = {
     "run": "Ordner und JSON anlegen, falls sie fehlen; dann Job-Schleife starten",
     "stop": "Job-Schleife anhalten",

@@ -31,6 +31,8 @@ def report_problem(report: object) -> str | None:
         return "result fehlt (Pflicht, wenn status nicht ok ist)"
     if not isinstance(report.get("preset"), (str, type(None))):
         return "preset ist kein Text"
+    if not isinstance(report.get("new_master"), (str, type(None))):
+        return "new_master ist kein Text"
     return None
 
 
