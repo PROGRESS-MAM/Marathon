@@ -33,7 +33,7 @@ summary_name = "Summe"
 match_separator = "———"
 invalid_path_chars = frozenset('<>:"/\\|?*' + "".join(map(chr, range(32))))
 reserved_names = frozenset({"CON", "PRN", "AUX", "NUL", *(f"{kind}{number}" for kind in ("COM", "LPT") for number in range(1, 10))})
-editshare_field, editshare_attempts = "39d 10 Mbit Proxy Path", 3  # Field for the delivered proxy path; failed cycles until reported.
+editshare_field, editshare_attempts = "039d 10 Mbit Proxy Path", 3  # Field for the delivered proxy path; failed cycles until reported.
 issue_sections = {
     "skipped": "Gefunden, aber nicht aufgenommen (letzter update-index, nicht in Gesamt)",
     "deviation": "Suche weicht von der JSON ab (letzter update-index, nicht übernommen)",
