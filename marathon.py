@@ -86,6 +86,7 @@ commands_help = {
     "create-folders": "Ordnerstruktur aller Kollektionen anlegen",
     "update-index": "Neue Suche (EditShare ∩ Veritone); neue Clips aufnehmen, Abweichungen in die Index-Fehlerliste; FFE-Abgleich",
     "update-ffe": "Nur FFE-Liste mit der bestehenden JSON abgleichen (ffe_tafel neu setzen), ohne Suche",
+    "ingest": "Masterdateien aus master_dir über die DEFA-ID mit der JSON abgleichen und eintragen (nur manuell)",
     "delete-folder": "SMB-Arbeitsordner bereinigen; Index behalten, Prozesszustand neu aufbauen",
     "status": "Anzeigen, was eingeschaltet ist",
     "help": "Diese Übersicht",
@@ -109,10 +110,12 @@ ffe_ambiguous_sections = {"ffe_ambiguous": "FFE-Titel uneindeutig (letzter FFE-A
 ffe_share_keys = ("reference_image", "reference_clip_dir")  # Names on the share; a change needs a restart like [paths].
 ffe_clip_suffix = ".mov"  # Only these files in reference_clip_dir count as FFE title clips.
 ffe_mtime_tolerance = 2  # Seconds; SMB servers may store modification times with reduced precision.
+ingest_source, ingest_separator = "Ingest", "__"  # files.master source of ingested masters; master name <DEFA-ID>__<title>
+ingest_sections = {"ingest_error": "Nicht eingetragen (Fehler)", "ingest_info": "Hinweise (kein Fehler, nicht eingetragen)"}
 
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "1.6.0"
+app_version = "1.7.0"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 log_dir = project_dir / "log"
@@ -132,6 +135,7 @@ config_schema = {  # section: {key: kind}; all values and their explanations liv
     "heartbeat": {"worker_timeout_minutes": "number", "max_job_hours": "number"},
     "veritone": {"base_url": "text", "token_file": "text", "field_clip_id": "text"},
     "ffe": {"list_file": "text", "reference_image": "name", "reference_clip_dir": "name"},
+    "ingest": {"master_dir": "text"},
 }
 
 # --------- INIT ---------
@@ -306,7 +310,12 @@ def _qc_inbox(collection: str) -> str:
 
 
 def _path(relative: str) -> Path:
-    return Path(cfg["root_path"]).joinpath(*relative.split("/"))
+    """Share path of a folder relative to root_path; absolute paths (ingested masters) stay as they are."""
+    return Path(relative) if Path(relative).is_absolute() else Path(cfg["root_path"]).joinpath(*relative.split("/"))
+
+
+def _join(folder: str, name: str) -> str:
+    return str(Path(folder) / name) if Path(folder).is_absolute() else f"{folder}/{name}"
 
 
 def _filter_ids(value) -> list[str] | None:
@@ -749,7 +758,8 @@ def _rebuild_process_state(state: dict) -> dict:
     for clip in state["clips"].values():
         groups[(_normalize(clip["identifier"]), _normalize(clip["title"]))].append(clip["clip_id"])
     for clip in state["clips"].values():
-        previous = _position(clip)
+        previous, master = _position(clip), clip["files"]["master"]
+        ingested = master if master and master.get("source") == ingest_source else None
         collection, clip_id = clip["collection"], clip["clip_id"]
         clip.update(job=None, attempts=0, ready=False, active=True, stage="restore", status="wartet", queued_at=_stamp())
         clip["files"] = {"master": None, "proxy": None}
@@ -770,6 +780,8 @@ def _rebuild_process_state(state: dict) -> dict:
             if missing is not None:
                 clip["files"]["master"] = {"folder": _master_folder(collection, clip_id),
                                            "names": list(clip["master_files"]), "source": "Neuaufbau", "last_seen_at": _now()}
+            if missing != [] and ingested and all(_has_file(ctx, ingested["folder"], name) for name in ingested["names"]):
+                clip["files"]["master"], missing = dict(ingested, last_seen_at=_now()), []  # Outside the work folders.
             if proxy:
                 clip["files"]["proxy"] = _file_entry(*proxy)
                 clip.update(ready=proxy[2] == "Zielordner", stage=None if proxy[2] == "Zielordner" else "qc")
@@ -1666,7 +1678,7 @@ def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
         _deliver_proxy(source, final, proxy["name"])
         clip["files"]["proxy"] = _file_entry(final, proxy["name"], "QC")
         master = clip["files"]["master"]
-        if master and not master.get("deleted_at"):
+        if master and not master.get("deleted_at") and master["source"] != ingest_source:  # Ingested masters are kept.
             _remove_tree(master["folder"], ctx, "Master nicht löschbar (bleiben liegen)")
             if not _path(master["folder"]).exists():
                 master["deleted_at"] = _now()
@@ -1953,7 +1965,7 @@ def _job_payload(clip: dict, job_id: str, folder: str) -> dict:
     elif stage == "transcode":
         master = clip["files"]["master"]
         payload.update({ffe_flag: clip[ffe_flag], "ffe_reference_clips": _reference_clips(),
-                        "inputs": [f"{master['folder']}/{name}" for name in master["names"]]})
+                        "inputs": [_join(master["folder"], name) for name in master["names"]]})
     else:
         payload.update({ffe_flag: clip[ffe_flag], "ffe_reference_image": _reference_image(),
                         "input": f"{clip['files']['proxy']['folder']}/{clip['files']['proxy']['name']}"})
@@ -2094,7 +2106,8 @@ def _summary_lines(issues: list[dict], sections: dict[str, str] = issue_sections
             continue
         clips = {key for keys in categories.values() for key in keys}
         total = sum(map(len, categories.values())) if section == "note" else len(clips)
-        unit = "" if section == "note" else " Einträge" if section.startswith("ffe_") else " Clips"
+        unit = ("" if section == "note" else " Einträge" if section.startswith("ffe_") else
+                " Dateien" if section.startswith("ingest_") else " Clips")
         lines.append(f"{title}: {total}{unit}")
         lines += [f"  {category}: {len(keys)}" for category, keys in
                   sorted(categories.items(), key=lambda item: (-len(item[1]), item[0].casefold()))]
@@ -2136,6 +2149,76 @@ def _keep_notes(state: dict, issues: list[dict]) -> None:
         if item["section"] == "note" and key not in known:
             state["notes"].append(item)
             known.add(key)
+
+
+# --------- FUNC: INGEST ---------
+def _master_defa_id(name: str) -> str | None:
+    identifier, separator, title = name.partition(ingest_separator)
+    return identifier.strip() if separator and identifier.strip() and Path(title).stem.strip() else None
+
+
+def _ingest_files(folder: str, ctx: dict) -> tuple[dict[str, list[tuple[str, int]]], int]:
+    """Files directly in folder grouped by normalized DEFA-ID and the number of checked files; bad names are reported."""
+    groups, checked = defaultdict(list), 0
+    for name, size in sorted(_scan(folder).values(), key=lambda item: item[0].casefold()):
+        if _ignored(name) or name.casefold().endswith(protocol_suffixes):
+            continue
+        checked += 1
+        defa_id = _master_defa_id(name)
+        if defa_id is None:
+            _issue(ctx, "ingest_error", f"Dateiname passt nicht zum Schema <DEFA-ID>{ingest_separator}<Titel>", name,
+                   _join(folder, name))
+        else:
+            groups[_normalize(defa_id)].append((name, size))
+    return groups, checked
+
+
+def _ingest_clip(clip: dict, folder: str, name: str, ctx: dict) -> bool:
+    """Enter one master for a clip waiting for restore; returns True if the clip was changed."""
+    path, master, sticky = _join(folder, name), clip["files"]["master"], clip["issues"]["sticky"]
+    head = f"{path}; {_clip_text(clip)}"
+    if master and master["source"] == ingest_source and _normalize(master["folder"]) == _normalize(folder) and \
+            [item.casefold() for item in master["names"]] == [name.casefold()]:
+        _issue(ctx, "ingest_info", "Bereits per Ingest eingetragen", name, f"{head}; Stand: {_position(clip)}")
+        return False
+    if clip["ready"] or clip["stage"] != "restore":
+        _issue(ctx, "ingest_info", "Clip nicht mehr im Restore (unverändert)", name, f"{head}; Stand: {_position(clip)}")
+        return False
+    if sticky and sticky["category"] != job_failed:
+        _issue(ctx, "ingest_error", "Clip inaktiv", name, f"{head}; {sticky['category']}: {sticky['detail']}")
+        return False
+    if not _withdraw(clip):
+        job = clip["job"]
+        _issue(ctx, "ingest_error", "Restore-Job läuft oder wurde gerade übernommen", name,
+               f"{head}; Job {job['id']} bei {job.get('worker') or 'unbekannt'}")
+        return False
+    clip["files"]["master"] = {"folder": folder, "names": [name], "source": ingest_source, "last_seen_at": _now()}
+    clip["attempts"] = 0
+    _set_issue(clip, "sticky")  # Only a failed restore can be set here; the master now exists.
+    _event(clip, "Restore abgeschlossen – Master per Ingest", path)
+    _enter(clip, "transcode")
+    _update_activity(clip, _context())  # Own context: general notes do not belong into the ingest list.
+    clip["status"] = _status(clip)
+    return True
+
+
+def _ingest_group(files: list[tuple[str, int]], clips: list[dict], folder: str, ctx: dict) -> bool:
+    """Check one DEFA-ID of the master folder; returns True if a clip was changed."""
+    names = [name for name, _ in files]
+    head = _join(folder, names[0])
+    if len(files) > 1:
+        detail = _detail(f"DEFA-ID={_master_defa_id(names[0])}", matches=[_join(folder, name) for name in names])
+        for name in names:
+            _issue(ctx, "ingest_error", "Mehrere Masterdateien mit derselben DEFA-ID", name, detail)
+    elif not files[0][1]:
+        _issue(ctx, "ingest_error", "Masterdatei ist leer", names[0], head)
+    elif not clips:
+        _issue(ctx, "ingest_info", "DEFA-ID nicht in der JSON", names[0], head)
+    elif len(clips) > 1:
+        _issue(ctx, "ingest_error", "DEFA-ID mehrfach in der JSON", names[0], _detail(head, matches=[_clip_text(clip) for clip in clips]))
+    else:
+        return _ingest_clip(clips[0], folder, names[0], ctx)
+    return False
 
 
 # --------- FUNC: COMMANDS ---------
@@ -2182,6 +2265,38 @@ def _update_ffe() -> None:
     state["updated_at"] = _now()
     _save_state(state)
     _log(f"FFE-Abgleich abgeschlossen: {_ffe_text(counts)}{_details(error_list, ambiguous_list)}; "
+         f"Dauer: {perf_counter() - started:.1f} s.")
+
+
+def _ingest() -> None:
+    """Match the master files in master_dir via DEFA-ID with the JSON and enter them; only started by the command."""
+    started, folder = perf_counter(), cfg["master_dir"]
+    _log(f"Ingest gestartet: {folder}")
+    if not state_path.exists():
+        raise RuntimeError("Noch keine JSON – zuerst 'update-index' oder 'run'.")
+    if not Path(folder).is_absolute():
+        raise ValueError(f"[ingest] master_dir muss ein vollständiger Pfad sein: {folder}; Zustand unverändert.")
+    _check_root()
+    if not Path(folder).is_dir():
+        raise FileNotFoundError(f"Master-Ordner nicht erreichbar: {folder}; Zustand unverändert.")
+    state, ctx = _load_state(), _context()
+    if state.get("cleanup", {}).get("pending"):
+        raise RuntimeError("Bereinigung noch unvollständig; zuerst 'delete-folder' erneut ausführen.")
+    by_id = defaultdict(list)
+    for clip in sorted(state["clips"].values(), key=lambda item: int(item["clip_id"])):
+        by_id[_normalize(clip["identifier"])].append(clip)
+    groups, checked = _ingest_files(folder, ctx)
+    entered = sum(_ingest_group(files, by_id.get(key, []), folder, ctx) for key, files in groups.items())
+    if entered:
+        state["updated_at"] = _now()
+        _save_state(state)
+    when = datetime.now().astimezone()
+    error_list = f"{_file_stamp('ingest', when)}_errors.txt" if ctx["issues"] else None
+    if error_list:
+        _write_new(error_dir / error_list, _format_errors(ctx["issues"], when, "Ingest-Fehlerliste", ingest_sections))
+    counts = {section: len({item["key"] for item in ctx["issues"] if item["section"] == section}) for section in ingest_sections}
+    _log(f"Ingest abgeschlossen: {checked} Dateien geprüft, {entered} eingetragen (weiter an Transcode), "
+         f"{counts['ingest_error']} nicht eingetragen (Fehler), {counts['ingest_info']} Hinweise{_details(error_list)}; "
          f"Dauer: {perf_counter() - started:.1f} s.")
 
 
@@ -2397,6 +2512,8 @@ def main(argv: list[str] | None = None) -> None:
                 pending_delete = _begin_delete()
             elif command == "update-ffe":
                 _update_ffe()
+            elif command == "ingest":
+                _ingest()
             else:
                 _update_index()
             if command in ("run", "auto-report"):

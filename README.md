@@ -1,6 +1,6 @@
 # Marathon
 
-Marathon baut aus EditShare-Suche und Veritone einen Clip-Index (JSON), legt Restore-, Transcode- und QC-Jobs nach Prioliste für die Worker aus und erstellt Berichte. Zusätzlich markiert Marathon Clips, die die FFE-Filmtafel benötigen, und stellt den Workern die Referenzdateien bereit.
+Marathon baut aus EditShare-Suche und Veritone einen Clip-Index (JSON), legt Restore-, Transcode- und QC-Jobs nach Prioliste für die Worker aus und erstellt Berichte. Zusätzlich markiert Marathon Clips, die die FFE-Filmtafel benötigen, stellt den Workern die Referenzdateien bereit und trägt auf Befehl vorhandene Masterdateien in den Index ein (Ingest).
 
 ## Installation
 
@@ -31,6 +31,8 @@ res/
 
 Version 1.6.0 nutzt ein neues JSON- und Job-Format. Für den Umstieg `state/marathon.json` entfernen und mit `run` neu aufbauen.
 
+Ab Version 1.7.0 ist `[ingest] master_dir` in `res/config.ini` Pflicht; ohne den Eintrag pausiert Marathon. Die JSON bleibt unverändert nutzbar.
+
 ## Start
 
 ~~~bash
@@ -52,6 +54,7 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 | `create-folders` | Ordnerstruktur aller Kollektionen anlegen und FFE-Referenzen bereitstellen |
 | `update-index` | Neue Suche (EditShare ∩ Veritone), neue Clips aufnehmen, Abweichungen melden, danach FFE-Abgleich |
 | `update-ffe` | Nur FFE-Liste mit der bestehenden JSON abgleichen, ohne Suche |
+| `ingest` | Masterdateien aus `master_dir` über die DEFA-ID mit der JSON abgleichen und eintragen; läuft nur auf diesen Befehl |
 | `delete-folder` | SMB-Arbeitsordner bereinigen; Index bleibt, Prozesszustand wird neu aufgebaut. Bei Clip-/Mediendateien Bestätigung mit `loeschen` |
 | `status` | Anzeigen, was eingeschaltet ist |
 | `help` | Befehlsübersicht |
@@ -94,16 +97,73 @@ Nach Änderungen an der FFE-Liste genügt `update-ffe`.
 - Marathon kopiert `res/FFE Filmerbe/FFE-Filmerbe-DEFA-Titel_Tafel.png` nach `<root_path>/<work_dir>/worker/` und spiegelt alle `.mov`-Dateien aus `res/FFE Filmerbe/` nach `<root_path>/<work_dir>/worker/FFE Filmerbe/` – bei `run`, `create-folders` und in jedem Job-Zyklus. Geänderte Dateien (Größe oder Änderungszeit) werden neu kopiert, im lokalen Ordner entfernte Clips und andere Dateien im Clip-Ordner auf dem SMB gelöscht.
 - `delete-folder` löscht die Referenzdateien mit dem Arbeitsordner, ohne Bestätigung dafür zu verlangen; `run` oder `create-folders` legen sie wieder ab.
 
-**Job-Felder (Job-`schema_version` 4), Pfade relativ zu `root_path`:**
+**Job-Felder (Job-`schema_version` 4), Pfade relativ zu `root_path` (Ausnahme: `inputs` von Ingest-Mastern):**
 
 | Job | Feld | Inhalt |
 | --- | --- | --- |
 | Transcode | `ffe_tafel` | `true`/`false` |
 | Transcode | `ffe_reference_clips` | Liste aller FFE-Clips, z. B. `.marathon/worker/FFE Filmerbe/2K_2_35.mov` |
+| Transcode | `inputs` | Masterdateien; nach `ingest` vollständiger Pfad, z. B. `\\10.0.77.11\Ablage KI Proxy_1\++ Master repariert\DEFA14097__….mov` |
 | QC | `ffe_tafel` | `true`/`false` |
 | QC | `ffe_reference_image` | `.marathon/worker/FFE-Filmerbe-DEFA-Titel_Tafel.png` |
 
 Maßgeblich ist der Wert beim Erstellen des Jobs.
+
+## Ingest (vorhandene Master)
+
+~~~bash
+Marathon> ingest
+python marathon.py ingest      # oder direkt beim Start
+~~~
+
+Läuft nur, wenn der Befehl eingegeben wird – nie automatisch. Die Job-Schleife darf dabei laufen.
+
+**Masterordner** (`[ingest] master_dir`, vollständiger Pfad): Geprüft werden nur Dateien direkt im Ordner, Unterordner nicht.
+
+- Namensschema `<DEFA-ID>__<Titel>.<Endung>`, z. B. `DEFA14097__Rosa Luxemburg - Stationen ihres Lebens.mov`.
+- DEFA-ID = Text vor dem ersten `__`. Der Titel und Zusätze wie `_zusatz` spielen für den Abgleich keine Rolle.
+- Abgleich: DEFA-ID gegen den Identifier (`001 Identifier`) der Clips in der JSON, ohne Unterscheidung von Groß-/Kleinschreibung.
+
+**Eintrag** – bei genau einer Masterdatei und genau einem Clip in `Queue Restore`:
+
+~~~json
+"files": {
+  "master": {
+    "folder": "\\\\10.0.77.11\\Ablage KI Proxy_1\\++ Master repariert",
+    "names": ["DEFA14097__Rosa Luxemburg - Stationen ihres Lebens.mov"],
+    "source": "Ingest",
+    "last_seen_at": "..."
+  },
+  "proxy": null
+}
+~~~
+
+- Der Restore gilt als erfolgreich abgeschlossen: Stufe `transcode`, Versuche auf 0; ein endgültig fehlgeschlagener Restore wird aufgehoben, der Clip ist wieder aktiv.
+- Ein offener Restore-Job wird zurückgezogen. Der nächste Job-Zyklus legt den Transcode-Job aus.
+- History: `Restore abgeschlossen – Master per Ingest` (mit Pfad der Masterdatei) und `Weiter an Transcode`.
+
+**Nicht eingetragen – Fehler:**
+
+- DEFA-ID mehrfach in der JSON
+- Mehrere Masterdateien mit derselben DEFA-ID
+- Dateiname passt nicht zum Schema (kein `__`)
+- Masterdatei ist leer
+- Restore-Job läuft bereits bei einem Worker (`ingest` später wiederholen)
+- Clip aus anderem Grund inaktiv (z. B. Zuordnung unklar)
+
+**Nicht eingetragen – Hinweise, kein Fehler:**
+
+- DEFA-ID nicht in der JSON
+- Clip nicht mehr im Restore (Transcode, QC oder bereit) – bleibt unverändert
+- Bereits per Ingest eingetragen – `ingest` kann beliebig oft laufen
+
+Fehler und Hinweise stehen in `reports/errors/ingest_<stempel>_errors.txt`, die Zahlen im Protokoll.
+
+**Danach:**
+
+- Masterdateien im Masterordner werden nie verschoben oder gelöscht, auch nicht nach erfolgreichem QC.
+- Fehlt eine eingetragene Masterdatei vor dem Transcode, wird der Clip wie bisher als `Verloren – Master fehlt vor Transcode` inaktiv.
+- `delete-folder` behält eingetragene Ingest-Master, solange die Datei vorhanden ist.
 
 ## Konfiguration (`res/config.ini`)
 
@@ -132,6 +192,7 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 | ffe | list_file | FFE-Liste, Pfad relativ zum res-Ordner |
 | ffe | reference_image | Referenz-Screenshot im Ordner `reference_clip_dir`; Name auch auf dem SMB |
 | ffe | reference_clip_dir | Ordner im res-Ordner mit allen FFE-Filmtafel-Clips; nur `.mov` zählen als Clips, mindestens einer nötig; Name auch auf dem SMB |
+| ingest | master_dir | Ordner mit vorhandenen Masterdateien `<DEFA-ID>__<Titel>.<Endung>` (vollständiger Pfad); nur `ingest` liest ihn, Änderungen gelten ohne Neustart |
 
 ## Ausgaben
 
@@ -140,3 +201,4 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 - `reports/errors/index_<stempel>_errors.txt` – Fehlerliste von `update-index` (inklusive nicht gefundener FFE-Titel)
 - `reports/errors/ffe_<stempel>_errors.txt` – nicht gefundene FFE-Titel von `update-ffe`
 - `reports/errors/<index|ffe>_<stempel>_ffe_uneindeutig.txt` – uneindeutige FFE-Treffer
+- `reports/errors/ingest_<stempel>_errors.txt` – nicht eingetragene Masterdateien und Hinweise von `ingest`
