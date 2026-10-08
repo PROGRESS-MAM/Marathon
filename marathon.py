@@ -7,7 +7,9 @@ import json
 import stat
 import os
 import queue
+import re
 import shutil
+import string
 import tempfile
 import threading
 import unicodedata
@@ -55,13 +57,15 @@ issue_sections = {
     "skipped": "Gefunden, aber nicht aufgenommen (letzter update-index, nicht in Gesamt)",
     "deviation": "Suche weicht von der JSON ab (letzter update-index, nicht übernommen)",
     "veritone_only": "Nur bei Veritone gefunden (letzter update-index, nicht in Gesamt)",
+    "veritone_multi": "Barcode mehrfach bei Veritone (letzter update-index, Veritone-ID nicht übernommen)",
     "ffe_missing": "FFE-Titel nicht in der JSON (letzter FFE-Abgleich)",
     "inactive": "In der JSON, aber nicht aktiv (nicht in Gesamt)",
     "final": "Auffällige Clip-Dateien in finalen Ablageordnern",
     "note": "Hinweise (betroffene Clips zählen weiter)",
 }
-index_sections = ("skipped", "deviation", "veritone_only")
-index_labels = {"skipped": "nicht aufgenommen", "deviation": "Abweichungen", "veritone_only": "nur bei Veritone"}
+index_sections = ("skipped", "deviation", "veritone_only", "veritone_multi")
+index_labels = {"skipped": "nicht aufgenommen", "deviation": "Abweichungen", "veritone_only": "nur bei Veritone",
+                "veritone_multi": "Veritone-ID uneindeutig"}
 problem_categories = {  # kind: (category for new clips, category for clips already in the JSON)
     "missing": (None, "Nicht mehr in der Suche"),
     "multi": ("Clip-ID in mehreren Kollektionen", "Clip-ID jetzt in mehreren Kollektionen"),
@@ -72,6 +76,7 @@ problem_categories = {  # kind: (category for new clips, category for clips alre
     "veritone": ("Nicht bei Veritone", "Nicht mehr bei Veritone"),
 }
 metadata_changed = "Metadaten in der Suche geändert"
+veritone_missing, veritone_ambiguous = "Veritone-ID fehlt", "Mehrere Assets mit demselben Barcode"
 veritone_unmatched, barcode_missing = "Kein passender Clip in der EditShare-Suche dieser Kollektion", "Ohne Barcode bei Veritone"
 lost_proxy, lost_master = "Verloren – Proxy fehlt", "Verloren – Master fehlt vor Transcode"
 qc_rejected, job_failed = "QC nicht bestanden", "Job endgültig fehlgeschlagen"
@@ -84,25 +89,25 @@ commands_help = {
     "auto-report-off": "Täglichen Auto-Bericht ausschalten",
     "report": "Manuellen Bericht sofort erstellen",
     "create-folders": "Ordnerstruktur aller Kollektionen anlegen",
-    "update-index": "Neue Suche (EditShare ∩ Veritone); neue Clips aufnehmen, Abweichungen in die Index-Fehlerliste; FFE-Abgleich",
+    "update-index": "Neue Suche (EditShare ∩ Veritone); neue Clips aufnehmen, fehlende Felder ergänzen, Abweichungen in die Index-Fehlerliste; FFE-Abgleich",
     "update-ffe": "Nur FFE-Liste mit der bestehenden JSON abgleichen (ffe_tafel neu setzen), ohne Suche",
-    "ingest": "Masterdateien aus master_dir über die DEFA-ID mit der JSON abgleichen und eintragen (nur manuell)",
+    "ingest-master": "Masterdateien aus master_dir über die DEFA-ID mit der JSON abgleichen und eintragen (nur manuell)",
+    "ingest-proxy": "Proxys aus proxy_dir über die DEFA-ID abgleichen, umbenannt in den QC-Eingang verschieben (nur manuell)",
     "delete-folder": "SMB-Arbeitsordner bereinigen; Index behalten, Prozesszustand neu aufbauen",
     "status": "Anzeigen, was eingeschaltet ist",
     "help": "Diese Übersicht",
     "quit": "Marathon beenden",
 }
-command_aliases = {"exit": "quit", "manual-report": "report", "manueller-report": "report", "auto-report-on": "auto-report"}
 missing_job_grace = timedelta(minutes=30)  # Before a vanished job file is recreated.
 editshare_filter_fields = frozenset({"006 Source PROGRESS", "007 Collection PROGRESS", "101a Genre German"})
-token_keys = ("vt_api_token", "api_key", "apiKey", "token", "access_token")
+token_key = "vt_api_token"  # KEY=VALUE line in token_file
 veritone_page_size, veritone_timeout = 200, 120  # Search and byIds take at most 200 per call.
 veritone_placeholder = ("Production.Codec", "placeholder")  # Field and casefolded value of placeholder assets.
 veritone_passes = 3  # Paging is not always stable; missing assets are searched again in further passes.
 veritone_settle_seconds = 30  # Wait between triggering a search and reading its pages; the API has no "done" signal.
 tracked_fields = {"collection": "Kollektion", "identifier": field_names["identifier"], "title": field_names["title"],
                   "clip_name_with_extension": field_names["clip_name"], "master_files": field_names["userpath"],
-                  "filehashes": field_names["hash"]}
+                  "filehashes": field_names["hash"], "veritone_id": "Veritone-ID"}
 ffe_flag = "ffe_tafel"
 ffe_missing = "Kein Clip mit genau dieser defa_id und diesem title"
 ffe_ambiguous = "Mehrere Clips mit genau dieser defa_id und diesem title"
@@ -115,7 +120,7 @@ ingest_sections = {"ingest_error": "Nicht eingetragen (Fehler)", "ingest_info": 
 
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "1.7.0"
+app_version = "1.8.0"
 project_dir = Path(__file__).resolve().parent
 res_dir = project_dir / "res"
 log_dir = project_dir / "log"
@@ -128,14 +133,14 @@ lock_path = state_dir / "marathon.lock"
 main_log = log_dir / "marathon.log"
 config_schema = {  # section: {key: kind}; all values and their explanations live in res/config.ini
     "paths": {"root_path": "text", "defa_dir": "name", "work_dir": "name", "defa_marker": "text",
-              "proxy_prefix": "text", "cred_file": "text", "mapping_file": "text", "priority_file": "text"},
+              "proxy_name": "pattern", "cred_file": "text", "mapping_file": "text", "priority_file": "text"},
     "operation": {"auto_report_time": "time", "retry_minutes": "number"},
     "timing": {"cycle_seconds": "number", "max_job_attempts": "number"},
     "limits": {key: "count" for key in limit_keys.values()},
     "heartbeat": {"worker_timeout_minutes": "number", "max_job_hours": "number"},
     "veritone": {"base_url": "text", "token_file": "text", "field_clip_id": "text"},
     "ffe": {"list_file": "text", "reference_image": "name", "reference_clip_dir": "name"},
-    "ingest": {"master_dir": "text"},
+    "ingest": {"master_dir": "text", "proxy_dir": "text", "proxy_prefix": "text"},
 }
 
 # --------- INIT ---------
@@ -190,6 +195,18 @@ def _parse_value(kind: str, raw: str):
             return time.fromisoformat(raw)
         except ValueError:
             raise ValueError("erwartet HH:MM") from None
+    if kind == "pattern":
+        try:
+            parts = list(string.Formatter().parse(raw))
+        except ValueError:
+            parts = None
+        literal = "".join(text for text, *_ in parts or ())
+        if not parts or sorted(field for _, field, _, _ in parts if field is not None) != ["clip_id", "veritone_id"] or \
+                any(spec or conversion for _, _, spec, conversion in parts) or any(char in invalid_path_chars for char in literal) or \
+                not Path(literal).suffix:
+            raise ValueError("erwartet einen Dateinamen mit genau {veritone_id} und {clip_id} und Endung, "
+                             "z. B. {veritone_id}_{clip_id}_10Mbit.mp4")
+        return raw
     if kind == "name" and (any(char in invalid_path_chars for char in raw) or raw in (".", "..") or raw != raw.rstrip(". ")):
         raise ValueError("muss ein einfacher Ordnername sein")
     return raw
@@ -411,7 +428,7 @@ def _file_name(userpath: str) -> str:
 
 
 def _context() -> dict:
-    return {"issues": [], "listings": {}, "indexes": {}, "final_counts": {}}
+    return {"issues": [], "listings": {}, "final_counts": {}}
 
 
 def _issue(ctx: dict, section: str, category: str, key: str, detail: str) -> None:
@@ -754,43 +771,31 @@ def _cleanup_plan() -> dict:
 
 def _rebuild_process_state(state: dict) -> dict:
     """Keep index, metadata and history; rediscover remaining files without search, jobs or directory creation."""
-    ctx, groups = _context(), defaultdict(list)
-    for clip in state["clips"].values():
-        groups[(_normalize(clip["identifier"]), _normalize(clip["title"]))].append(clip["clip_id"])
+    ctx = _context()
     for clip in state["clips"].values():
         previous, master = _position(clip), clip["files"]["master"]
-        ingested = master if master and master.get("source") == ingest_source else None
+        ingested = master if master and master["source"] == ingest_source else None
         collection, clip_id = clip["collection"], clip["clip_id"]
         clip.update(job=None, attempts=0, ready=False, active=True, stage="restore", status="wartet", queued_at=_stamp())
         clip["files"] = {"master": None, "proxy": None}
         clip["issues"] = {"file": None, "sticky": None}
-        found = [(folder, source, _lookup(ctx, folder, clip["identifier"], clip["title"])) for folder, source in
-                 [(_final_folder(collection), "Zielordner"), (_qc_inbox(collection), "QC-Eingang")]]
-        group = groups[(_normalize(clip["identifier"]), _normalize(clip["title"]))]
-        crowded = [f"{folder}/{name}" for folder, _, names in found if len(names) > 1 for name in names]
-        if len(group) > 1:
-            _set_issue(clip, "sticky", assignment_unclear, "Doppelte Index-Zuordnung",
-                       [f"Kollektion={state['clips'][other]['collection']}, {field_names['clip_id']}={other}"
-                        for other in sorted(group, key=int)])
-        elif crowded:
-            _set_issue(clip, "sticky", assignment_unclear, "Mehrere Proxy-Dateien gefunden", crowded)
-        else:
-            proxy = next(((folder, names[0], source) for folder, source, names in found if names), None)
-            missing = _missing_masters(ctx, collection, clip_id, clip["master_files"])
-            if missing is not None:
-                clip["files"]["master"] = {"folder": _master_folder(collection, clip_id),
-                                           "names": list(clip["master_files"]), "source": "Neuaufbau", "last_seen_at": _now()}
-            if missing != [] and ingested and all(_has_file(ctx, ingested["folder"], name) for name in ingested["names"]):
-                clip["files"]["master"], missing = dict(ingested, last_seen_at=_now()), []  # Outside the work folders.
-            if proxy:
-                clip["files"]["proxy"] = _file_entry(*proxy)
-                clip.update(ready=proxy[2] == "Zielordner", stage=None if proxy[2] == "Zielordner" else "qc")
-            elif missing == []:
-                clip["stage"] = "transcode"
-            elif not clip["master_files"] or len(clip["master_files"]) != len(clip["filehashes"]):
-                _set_issue(clip, "sticky", assignment_unclear,
-                           f"Dateinamen und Hashes reichen nicht für Restore; {field_names['userpath']}={_joined(clip['master_files'])}, "
-                           f"{field_names['hash']}={_joined(clip['filehashes'])}, {field_names['backups']}={_joined(clip['lto_tapes'])}")
+        places = ((_final_folder(collection), "Zielordner"), (_qc_inbox(collection), "QC-Eingang"))
+        proxy = next(((folder, name, source) for folder, source in places if (name := _find_proxy(ctx, folder, clip))), None)
+        missing = _missing_masters(ctx, collection, clip_id, clip["master_files"])
+        if missing is not None:
+            clip["files"]["master"] = {"folder": _master_folder(collection, clip_id),
+                                       "names": list(clip["master_files"]), "source": "Neuaufbau", "last_seen_at": _now()}
+        if missing != [] and ingested and all(_has_file(ctx, ingested["folder"], name) for name in ingested["names"]):
+            clip["files"]["master"], missing = dict(ingested, last_seen_at=_now()), []  # Outside the work folders.
+        if proxy:
+            clip["files"]["proxy"] = _file_entry(*proxy)
+            clip.update(ready=proxy[2] == "Zielordner", stage=None if proxy[2] == "Zielordner" else "qc")
+        elif missing == []:
+            clip["stage"] = "transcode"
+        elif not clip["master_files"] or len(clip["master_files"]) != len(clip["filehashes"]):
+            _set_issue(clip, "sticky", assignment_unclear,
+                       f"Dateinamen und Hashes reichen nicht für Restore; {field_names['userpath']}={_joined(clip['master_files'])}, "
+                       f"{field_names['hash']}={_joined(clip['filehashes'])}, {field_names['backups']}={_joined(clip['lto_tapes'])}")
         _update_activity(clip, ctx)
         clip["status"] = _status(clip)
         _event(clip, "Prozesszustand nach Bereinigung neu aufgebaut", f"Vorher: {previous}")
@@ -1169,22 +1174,12 @@ def _search_clips(mapping: list[dict], ctx: dict) -> dict[str, list[dict]]:
 
 # --------- FUNC: VERITONE ---------
 def _veritone_token() -> str:
-    """Token from a JSON object or from KEY=VALUE lines (.env)."""
-    text = _res("token_file").read_text(encoding="utf-8-sig").strip()
-    if text.startswith("{"):
-        values = json.loads(text)
-        if not isinstance(values, dict):
-            raise ValueError(f"{cfg['token_file']}: JSON muss ein Objekt sein.")
-    else:
-        values = {}
-        for line in text.splitlines():
-            key, separator, value = line.strip().removeprefix("export ").partition("=")
-            if separator:
-                values.setdefault(key.strip(), value.strip().strip("\"'"))
-    token = next((str(values[key]).strip() for key in token_keys if str(values.get(key) or "").strip()), "")
-    if not token:
-        raise ValueError(f"{cfg['token_file']}: kein Token gefunden (erwartet einen der Einträge {', '.join(token_keys)}).")
-    return token
+    """Token from the line vt_api_token=<token> in token_file (.env)."""
+    for line in _res("token_file").read_text(encoding="utf-8-sig").splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key.strip() == token_key and value.strip().strip("\"'"):
+            return value.strip().strip("\"'")
+    raise ValueError(f"{cfg['token_file']}: keine Zeile {token_key}=<Token> gefunden.")
 
 
 def _veritone_get(path: str, token: str, params: dict):
@@ -1259,8 +1254,8 @@ def _veritone_assets(entry: dict, token: str) -> tuple[list[str], int]:
                        f"Durchläufen; Zustand unverändert.")
 
 
-def _veritone_barcodes(name: str, asset_ids: list[str], token: str, ctx: dict) -> tuple[dict[str, tuple[str, str]], int, int]:
-    """Barcodes of one collection as {normalized: (barcode, assetId)}, assets without one (reported) and placeholders.
+def _veritone_barcodes(name: str, asset_ids: list[str], token: str, ctx: dict) -> tuple[dict[str, tuple[str, list[str]]], int, int]:
+    """Barcodes of one collection as {normalized: (barcode, [assetIds])}, assets without one (reported) and placeholders.
 
     Placeholder assets are ignored completely, like placeholders in the EditShare search.
     """
@@ -1284,7 +1279,9 @@ def _veritone_barcodes(name: str, asset_ids: list[str], token: str, ctx: dict) -
                 missing += 1
                 _issue(ctx, "veritone_only", barcode_missing, f"{name}#{asset_id}", f"Kollektion={name}, assetId={asset_id}")
             for barcode in values[asset_id]:
-                barcodes.setdefault(_normalize(barcode), (barcode, asset_id))
+                assets = barcodes.setdefault(_normalize(barcode), (barcode, []))[1]
+                if asset_id not in assets:
+                    assets.append(asset_id)
         _search_progress(f"Veritone {name!r}: lade Barcodes {start + len(batch)}/{len(asset_ids)}")
     if len(asset_ids) > placeholders and not barcodes:
         raise RuntimeError(f"Veritone liefert in {name!r} kein Feld {field!r}; [veritone] field_clip_id prüfen. "
@@ -1292,8 +1289,8 @@ def _veritone_barcodes(name: str, asset_ids: list[str], token: str, ctx: dict) -
     return barcodes, missing, placeholders
 
 
-def _veritone_clip_ids(mapping: list[dict], token: str, ctx: dict) -> dict[str, dict[str, tuple[str, str]]]:
-    """Barcodes per collection: {collection: {normalized barcode: (barcode, assetId)}}."""
+def _veritone_clip_ids(mapping: list[dict], token: str, ctx: dict) -> dict[str, dict[str, tuple[str, list[str]]]]:
+    """Barcodes per collection: {collection: {normalized barcode: (barcode, [assetIds])}}."""
     _log(f"Veritone-Abfrage gestartet: {len(mapping)} Kollektionen.")
     result = {}
     for entry in mapping:
@@ -1305,10 +1302,11 @@ def _veritone_clip_ids(mapping: list[dict], token: str, ctx: dict) -> dict[str, 
     return result
 
 
-def _intersect(found: dict[str, list[dict]], veritone: dict[str, dict[str, tuple[str, str]]], mapping: list[dict],
+def _intersect(found: dict[str, list[dict]], veritone: dict[str, dict[str, tuple[str, list[str]]]], mapping: list[dict],
                ctx: dict) -> tuple[dict[str, list[dict]], dict[str, tuple[str, str]]]:
     """Keep hits whose 001 Identifier is a barcode of the same collection at Veritone.
 
+    Kept hits get the assetId as veritone_id (None if the barcode has several assets, reported).
     Returns the kept hits and {Clip_ID: (text, reason)} for clips without any match; Veritone-only barcodes are reported.
     """
     kept, dropped, counts = {}, {}, defaultdict(lambda: [0, 0])  # collection: [only EditShare, both]
@@ -1316,11 +1314,15 @@ def _intersect(found: dict[str, list[dict]], veritone: dict[str, dict[str, tuple
     for clip_id, hits in found.items():
         matched, elsewhere = [], set()
         for hit in hits:
-            keys = {_normalize(value) for value in hit["identifiers"]}
+            keys, barcodes = {_normalize(value) for value in hit["identifiers"]}, veritone[hit["collection"]]
             seen[hit["collection"]] |= keys
-            shared = bool(veritone[hit["collection"]].keys() & keys)
-            counts[hit["collection"]][shared] += 1
-            if shared:
+            assets = list(dict.fromkeys(asset for key in keys & barcodes.keys() for asset in barcodes[key][1]))
+            counts[hit["collection"]][bool(assets)] += 1
+            if assets:
+                hit["veritone_id"] = assets[0] if len(assets) == 1 else None
+                if len(assets) > 1:
+                    _issue(ctx, "veritone_multi", veritone_ambiguous, clip_id,
+                           _detail(_clip_text(hit), matches=[f"assetId={asset}" for asset in assets]))
                 matched.append(hit)
             else:
                 elsewhere |= {name for name, barcodes in veritone.items() if name != hit["collection"] and barcodes.keys() & keys}
@@ -1333,9 +1335,10 @@ def _intersect(found: dict[str, list[dict]], veritone: dict[str, dict[str, tuple
     for entry in mapping:
         name = entry["name"]
         only_veritone = [item for key, item in veritone[name].items() if key not in seen[name]]
-        for barcode, asset_id in only_veritone:
-            _issue(ctx, "veritone_only", veritone_unmatched, f"{name}#{asset_id}",
-                   f"Kollektion={name}, Barcode={barcode}, assetId={asset_id}")
+        for barcode, assets in only_veritone:
+            for asset_id in assets:
+                _issue(ctx, "veritone_only", veritone_unmatched, f"{name}#{asset_id}",
+                       f"Kollektion={name}, Barcode={barcode}, assetId={asset_id}")
         only, both = counts[name]
         _log(f"Abgleich {name!r}: EditShare {only + both}, Veritone {len(veritone[name])}, Schnittmenge {both}; "
              f"nur EditShare {only}, nur Veritone {len(only_veritone)}.")
@@ -1343,49 +1346,35 @@ def _intersect(found: dict[str, list[dict]], veritone: dict[str, dict[str, tuple
 
 
 # --------- FUNC: PROXY FILES ---------
-def _proxy_parts(name: str) -> tuple[str, str] | None:
-    prefix = cfg["proxy_prefix"] + "__"
-    if not name.casefold().startswith(prefix.casefold()):
-        return None
-    identifier, separator, title = name[len(prefix):].partition("__")
-    if not separator or not identifier.strip() or not title.strip():
-        return None
-    return identifier, title
+def _proxy_name(clip: dict) -> str | None:
+    """Proxy file name of a clip by proxy_name; None without Veritone-ID."""
+    veritone_id = clip.get("veritone_id")
+    return cfg["proxy_name"].format(veritone_id=veritone_id, clip_id=clip["clip_id"]) if veritone_id else None
 
 
-def _proxy_keys(name: str) -> list[tuple[str, str]] | None:
-    parts = _proxy_parts(name)
-    if parts is None:
-        return None
-    identifier, title = parts
-    return list(dict.fromkeys((_normalize(identifier), _normalize(value)) for value in (title, Path(title).stem)))
+def _proxy_ids(name: str) -> tuple[str, str] | None:
+    """(veritone_id, clip_id) of a file name by proxy_name."""
+    pattern = "".join(re.escape(text) + (rf"(?P<{field}>\d+)" if field else "")
+                      for text, field, _, _ in string.Formatter().parse(cfg["proxy_name"]))
+    match = re.fullmatch(pattern, name, re.IGNORECASE)
+    return (match["veritone_id"], match["clip_id"]) if match else None
 
 
 def _proxy_text(name: str) -> str:
-    parts = _proxy_parts(name)
-    return f", {field_names['identifier']}={parts[0]}, {field_names['title']}={Path(parts[1]).stem}" if parts else ""
+    ids = _proxy_ids(name)
+    return f", veritone_id={ids[0]}, {field_names['clip_id']}={ids[1]}" if ids else ""
 
 
-def _proxy_index(ctx: dict, folder: str) -> dict:
-    if folder in ctx["indexes"]:
-        return ctx["indexes"][folder]
-    index = defaultdict(list)
-    for name, size in _listing(ctx, folder).values():
-        skip = _ignored(name) or name.casefold().endswith(protocol_suffixes) or not size
-        for key in (None if skip else _proxy_keys(name)) or ():
-            if name not in index[key]:
-                index[key].append(name)
-    ctx["indexes"][folder] = index
-    return index
-
-
-def _lookup(ctx: dict, folder: str, identifier: str, title: str) -> list[str]:
-    return sorted(_proxy_index(ctx, folder).get((_normalize(identifier), _normalize(title)), []), key=str.casefold)
+def _find_proxy(ctx: dict, folder: str, clip: dict) -> str | None:
+    """Real name of the clip's non-empty proxy in folder, if present."""
+    name = _proxy_name(clip)
+    item = _listing(ctx, folder).get(name.casefold()) if name else None
+    return item[0] if item and item[1] else None
 
 
 # --------- FUNC: STATE ---------
 def _empty_state() -> dict:
-    return {"schema_version": 6, "priority": None, "notes": [], "index": {"updated_at": None, "counts": {}, "error_list": None},
+    return {"schema_version": 7, "priority": None, "notes": [], "index": {"updated_at": None, "counts": {}, "error_list": None},
             "ffe": {"updated_at": None, "counts": {}, "error_list": None, "ambiguous_list": None}, "workers": {}, "clips": {}}
 
 
@@ -1394,6 +1383,8 @@ def _clip_problem(clip_id: str, clip) -> str | None:
         return "Clip_ID passt nicht zum Eintrag"
     if not all(isinstance(clip.get(key), bool) for key in ("active", "ready", ffe_flag)):
         return f"active/ready/{ffe_flag} fehlt"
+    if not isinstance(clip.get("veritone_id"), (str, type(None))):  # Filled by update-index if missing.
+        return "veritone_id ist kein Text"
     if clip.get("stage") not in (*stages, None) or clip["ready"] != (clip["stage"] is None):
         return "Stufe passt nicht zu bereit"
     if not all(isinstance(clip.get(key), kind) for key, kind in (("history", list), ("files", dict), ("issues", dict))):
@@ -1410,7 +1401,7 @@ def _load_state() -> dict:
         return _empty_state()
     with state_path.open(encoding="utf-8") as handle:
         state = json.load(handle)
-    if not isinstance(state, dict) or state.get("schema_version") != 6 or not isinstance(state.get("clips"), dict) or \
+    if not isinstance(state, dict) or state.get("schema_version") != 7 or not isinstance(state.get("clips"), dict) or \
             not isinstance(state.get("ffe"), dict):
         raise ValueError("Unbekanntes Zustandsformat; keine Aktualisierung.")
     for clip_id, clip in state["clips"].items():
@@ -1455,7 +1446,7 @@ def _classify(clip_id: str, hits: list[dict], dropped: dict[str, tuple[str, str]
 
 
 def _new_clip(clip_id: str, hit: dict) -> dict:
-    return {"clip_id": clip_id, "collection": hit["collection"], "identifier": hit["identifier"],
+    return {"clip_id": clip_id, "collection": hit["collection"], "identifier": hit["identifier"], "veritone_id": hit["veritone_id"],
             "title": hit["title"], "clip_name_with_extension": hit["clip_name"], "filehashes": hit["hashes"],
             "master_files": hit["masters"], "lto_tapes": hit["lto_tapes"], "master_size": hit["master_size"], "status": "wartet", "active": True, "ready": False, ffe_flag: False, "stage": "restore",
             "queued_at": _stamp(), "preset": None, "job": None, "job_count": 0, "attempts": 0,
@@ -1471,20 +1462,14 @@ def _missing_masters(ctx: dict, collection: str, clip_id: str, names: list[str])
 
 
 def _admit(clips: dict, clip_id: str, hit: dict, ctx: dict) -> None:
-    collection, identifier, title = hit["collection"], hit["identifier"], hit["title"]
-    text = _clip_text(hit)
-    places = [(_final_folder(collection), "Zielordner"), (_qc_inbox(collection), "QC-Eingang")]
-    found = [(folder, source, _lookup(ctx, folder, identifier, title)) for folder, source in places]
-    crowded = [f"{folder}/{name}" for folder, _, names in found if len(names) > 1 for name in names]
-    if crowded:
-        _issue(ctx, "skipped", "Mehrere Proxy-Dateien gefunden", clip_id, _detail(text, matches=crowded))
-        return
-    proxy = next(((folder, names[0], source) for folder, source, names in found if names), None)
+    collection, clip, text = hit["collection"], _new_clip(clip_id, hit), _clip_text(hit)
+    places = ((_final_folder(collection), "Zielordner"), (_qc_inbox(collection), "QC-Eingang"))
+    proxy = next(((folder, name, source) for folder, source in places if (name := _find_proxy(ctx, folder, clip))), None)
     missing = _missing_masters(ctx, collection, clip_id, hit["masters"])
     if proxy is None and missing != [] and hit["restore_problem"]:
         _issue(ctx, "skipped", problem_categories["restore"][0], clip_id, f"{text}: {hit['restore_problem']}")
         return
-    clip, ready = _new_clip(clip_id, hit), bool(proxy) and proxy[2] == "Zielordner"
+    ready = bool(proxy) and proxy[2] == "Zielordner"
     if missing is not None and not ready:  # Recorded so the folder is deleted once the clip is ready.
         clip["files"]["master"] = {"folder": _master_folder(collection, clip_id), "names": list(hit["masters"]),
                                    "source": "Transcode-Eingang", "last_seen_at": _now()}
@@ -1508,14 +1493,28 @@ def _admit(clips: dict, clip_id: str, hit: dict, ctx: dict) -> None:
 
 
 def _changes(clip: dict, hit: dict) -> str:
+    """Differences between JSON and search; an unknown Veritone-ID on either side is no difference."""
     new = {"collection": hit["collection"], "identifier": hit["identifier"], "title": hit["title"],
-           "clip_name_with_extension": hit["clip_name"], "master_files": hit["masters"], "filehashes": hit["hashes"]}
-    return "; ".join(f"{label}: {clip[key]!r} → {new[key]!r}" for key, label in tracked_fields.items() if clip[key] != new[key])
+           "clip_name_with_extension": hit["clip_name"], "master_files": hit["masters"], "filehashes": hit["hashes"],
+           "veritone_id": hit["veritone_id"]}
+    return "; ".join(f"{label}: {clip.get(key)!r} → {new[key]!r}" for key, label in tracked_fields.items()
+                     if clip.get(key) is not None and new[key] is not None and clip[key] != new[key])
 
 
-def _reconcile(state: dict, found: dict[str, list[dict]], ctx: dict, dropped: dict[str, tuple[str, str]] | None = None) -> None:
-    """Admit new clips; for clips already in the JSON differences are only reported, the JSON stays the index."""
-    clips, dropped = state["clips"], dropped or {}
+def _fill(clip: dict, hit: dict) -> list[str]:
+    """Add fields missing in a known clip (and an empty Veritone-ID) from the search; existing values stay."""
+    template = _new_clip(clip["clip_id"], hit)
+    keys = [key for key in template if key not in clip or (key == "veritone_id" and clip[key] is None and template[key])]
+    for key in keys:
+        clip[key] = template[key]
+    if keys:
+        _event(clip, "Fehlende Felder ergänzt", ", ".join(keys))
+    return keys
+
+
+def _reconcile(state: dict, found: dict[str, list[dict]], ctx: dict, dropped: dict[str, tuple[str, str]] | None = None) -> int:
+    """Admit new clips and fill missing fields of known clips; other differences are only reported. Returns filled clips."""
+    clips, dropped, filled = state["clips"], dropped or {}, 0
     classified = {clip_id: _classify(clip_id, found.get(clip_id, []), dropped) for clip_id in {*found, *clips, *dropped}}
     groups, sources = defaultdict(list), {}
     for clip_id, (hit, _) in classified.items():
@@ -1539,8 +1538,11 @@ def _reconcile(state: dict, found: dict[str, list[dict]], ctx: dict, dropped: di
             head = problem.get("head") or _clip_text(clip or found[clip_id][0])
             _issue(ctx, section, problem_categories[problem["kind"]][index], clip_id,
                    _detail(head, problem.get("reason", ""), problem.get("matches")))
-        elif changes := _changes(clip, hit):
-            _issue(ctx, "deviation", metadata_changed, clip_id, _detail(_clip_text(clip), changes))
+        else:
+            filled += bool(_fill(clip, hit))
+            if changes := _changes(clip, hit):
+                _issue(ctx, "deviation", metadata_changed, clip_id, _detail(_clip_text(clip), changes))
+    return filled
 
 
 # --------- FUNC: WORKERS ---------
@@ -1550,7 +1552,7 @@ def _reconcile(state: dict, found: dict[str, list[dict]], ctx: dict, dropped: di
 # - Take the first *.json in <work_dir>/<stage>/offen (sorted by name) by renaming it into laufend/<worker>/;
 #   FileNotFoundError or PermissionError: another worker was faster or the job was withdrawn, try the next one.
 # - Read inputs only where the job says; write results only into the job's output_folder.
-#   Restore: all names from "files"; Transcode: exactly one proxy named by the proxy scheme; QC: never move the proxy.
+#   Restore: all names from "files"; Transcode: exactly one proxy named exactly "proxy_name"; QC: never move the proxy.
 # - Leave the job file in laufend; write the report as <report_folder>/<job_id>.json via a temp name not ending
 #   in ".json": {"job_id": str, "status": "ok"|"failed"|"rejected" (QC only), "result": str (required unless ok),
 #   "preset": str|null}.
@@ -1663,11 +1665,11 @@ def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
         proxies = [name for key, name in delivered.items() if not key.endswith(protocol_suffixes)]
         if len(proxies) != 1:
             return f"Transcode-Ausgang enthält {len(proxies)} Proxy-Dateien statt einer"
-        name = proxies[0]
-        if (_normalize(clip["identifier"]), _normalize(clip["title"])) not in (_proxy_keys(name) or []):
-            return f"Proxy-Name {name!r} entspricht nicht dem Namensschema"
-        _move(f"{out}/{name}", _qc_inbox(collection), replace=True)
-        clip["files"]["proxy"] = _file_entry(_qc_inbox(collection), name, "Transcode")
+        name, expected = proxies[0], _proxy_name(clip)
+        if not expected or name.casefold() != expected.casefold():
+            return f"Proxy-Name {name!r} statt {expected!r} (proxy_name im Job)"
+        _move(f"{out}/{name}", _qc_inbox(collection), expected, replace=True)
+        clip["files"]["proxy"] = _file_entry(_qc_inbox(collection), expected, "Transcode")
         clip["preset"] = report.get("preset")
         _enter(clip, "qc")
     else:
@@ -1832,6 +1834,8 @@ def _check_files(clip: dict, ctx: dict) -> tuple[str, str] | tuple[()]:
             return ()
         return lost_proxy, f"Datei {proxy['folder']}/{proxy['name']} (Quelle {proxy['source']}), zuletzt gesehen {proxy['last_seen_at']}"
     if clip["stage"] == "transcode" and not (job and job["state"] == "laufend"):
+        if not clip.get("veritone_id"):
+            return veritone_missing, "Kein Proxy-Name möglich; update-index ergänzt die Veritone-ID, sobald Veritone sie eindeutig liefert"
         master = files["master"]
         missing = [name for name in master["names"] if not _has_file(ctx, master["folder"], name)]
         if not missing:
@@ -1871,13 +1875,10 @@ def _status(clip: dict) -> str:
 
 def _final_audit(state: dict, mapping: list[dict], ctx: dict) -> None:
     """Count unexpected and unknown final files without changing files or JSON status."""
-    by_key, by_name = defaultdict(dict), defaultdict(dict)
-    clips = state["clips"]
+    clips, by_name = state["clips"], defaultdict(dict)
     for clip_id, clip in clips.items():
-        by_key[(_normalize(clip["identifier"]), _normalize(clip["title"]))][clip_id] = clip
-        proxy = clip["files"].get("proxy")
-        if proxy:
-            by_name[proxy["name"].casefold()][clip_id] = clip
+        if clip["files"]["proxy"]:
+            by_name[clip["files"]["proxy"]["name"].casefold()][clip_id] = clip
     finals = {_final_folder(entry["name"]) for entry in mapping} | {_final_folder(c["collection"]) for c in clips.values()}
     counts, matched = {}, defaultdict(list)
     for final in sorted(finals, key=str.casefold):
@@ -1885,9 +1886,9 @@ def _final_audit(state: dict, mapping: list[dict], ctx: dict) -> None:
         for name, size in sorted(_listing(ctx, final).values()):
             if _ignored(name) or name.casefold().endswith(protocol_suffixes):
                 continue
-            candidates = dict(by_name.get(name.casefold(), {}))
-            for key in _proxy_keys(name) or ():
-                candidates.update(by_key.get(key, {}))
+            candidates, ids = dict(by_name.get(name.casefold(), {})), _proxy_ids(name)
+            if ids and ids[1] in clips and clips[ids[1]].get("veritone_id") == ids[0]:
+                candidates[ids[1]] = clips[ids[1]]
             relative = f"{final}/{name}"
             if len(candidates) != 1:
                 counts[final]["unknown"] += 1
@@ -1899,7 +1900,7 @@ def _final_audit(state: dict, mapping: list[dict], ctx: dict) -> None:
             matched[clip_id].append((final, name, size, clip))
     for files in matched.values():
         for final, name, size, clip in files:
-            proxy = clip["files"].get("proxy")
+            proxy = clip["files"]["proxy"]
             expected = f"{proxy['folder']}/{proxy['name']}" if proxy else "Kein Proxy im JSON vermerkt"
             actual = f"{final}/{name}"
             reasons = []
@@ -1955,7 +1956,7 @@ def _leftovers(state: dict, mapping: list[dict], ctx: dict) -> None:
 
 def _job_payload(clip: dict, job_id: str, folder: str) -> dict:
     stage = clip["stage"]
-    payload = {"schema_version": 4, "job_id": job_id, "stage": stage_labels[stage], "clip_id": clip["clip_id"],
+    payload = {"schema_version": 5, "job_id": job_id, "stage": stage_labels[stage], "clip_id": clip["clip_id"],
                "collection": clip["collection"], "identifier": clip["identifier"], "title": clip["title"],
                "clip_name": clip["clip_name_with_extension"], "created_at": _now(),
                "report_folder": f"{folder}/fertig",
@@ -1964,7 +1965,7 @@ def _job_payload(clip: dict, job_id: str, folder: str) -> dict:
         payload.update(hashes=clip["filehashes"], files=clip["master_files"])
     elif stage == "transcode":
         master = clip["files"]["master"]
-        payload.update({ffe_flag: clip[ffe_flag], "ffe_reference_clips": _reference_clips(),
+        payload.update({ffe_flag: clip[ffe_flag], "ffe_reference_clips": _reference_clips(), "proxy_name": _proxy_name(clip),
                         "inputs": [_join(master["folder"], name) for name in master["names"]]})
     else:
         payload.update({ffe_flag: clip[ffe_flag], "ffe_reference_image": _reference_image(),
@@ -2015,7 +2016,6 @@ def _process(state: dict, mapping: list[dict], prio: dict[str, list[str]], ctx: 
         for folder in folders:
             _collect_reports(folder, jobs, ctx)
         ctx["listings"].clear()  # Reports moved files around.
-        ctx["indexes"].clear()
         for clip in clips.values():
             if clip["job"]:
                 _locate_job(clip, ctx)
@@ -2152,30 +2152,58 @@ def _keep_notes(state: dict, issues: list[dict]) -> None:
 
 
 # --------- FUNC: INGEST ---------
-def _master_defa_id(name: str) -> str | None:
+def _defa_id(name: str) -> str | None:
     identifier, separator, title = name.partition(ingest_separator)
     return identifier.strip() if separator and identifier.strip() and Path(title).stem.strip() else None
 
 
-def _ingest_files(folder: str, ctx: dict) -> tuple[dict[str, list[tuple[str, int]]], int]:
-    """Files directly in folder grouped by normalized DEFA-ID and the number of checked files; bad names are reported."""
+def _proxy_defa_id(name: str) -> str | None:
+    prefix = cfg["proxy_prefix"] + ingest_separator
+    return _defa_id(name[len(prefix):]) if name.casefold().startswith(prefix.casefold()) else None
+
+
+def _ingest_files(folder: str, parse, suffix: str | None, schema: str, ctx: dict) -> tuple[dict[str, list[tuple[str, int]]], int]:
+    """Files directly in folder grouped by normalized DEFA-ID and the number of checked files; others are reported."""
     groups, checked = defaultdict(list), 0
     for name, size in sorted(_scan(folder).values(), key=lambda item: item[0].casefold()):
         if _ignored(name) or name.casefold().endswith(protocol_suffixes):
             continue
         checked += 1
-        defa_id = _master_defa_id(name)
-        if defa_id is None:
-            _issue(ctx, "ingest_error", f"Dateiname passt nicht zum Schema <DEFA-ID>{ingest_separator}<Titel>", name,
-                   _join(folder, name))
+        if suffix and not name.casefold().endswith(suffix.casefold()):
+            _issue(ctx, "ingest_info", f"Andere Endung als {suffix} (ignoriert)", name, _join(folder, name))
+        elif (defa_id := parse(name)) is None:
+            _issue(ctx, "ingest_error", f"Dateiname passt nicht zum Schema {schema}", name, _join(folder, name))
         else:
             groups[_normalize(defa_id)].append((name, size))
     return groups, checked
 
 
-def _ingest_clip(clip: dict, folder: str, name: str, ctx: dict) -> bool:
-    """Enter one master for a clip waiting for restore; returns True if the clip was changed."""
-    path, master, sticky = _join(folder, name), clip["files"]["master"], clip["issues"]["sticky"]
+def _ingest_ready(clip: dict, head: str, name: str, ctx: dict) -> bool:
+    """Checks shared by both ingests; withdraws an open job. False (reported) if the clip cannot take the file."""
+    sticky = clip["issues"]["sticky"]
+    if sticky and sticky["category"] != job_failed:
+        _issue(ctx, "ingest_error", "Clip inaktiv", name, f"{head}; {sticky['category']}: {sticky['detail']}")
+        return False
+    if not _withdraw(clip):
+        job = clip["job"]
+        _issue(ctx, "ingest_error", "Job läuft oder wurde gerade übernommen", name,
+               f"{head}; {stage_labels[job['stage']]}-Job {job['id']} bei {job.get('worker') or 'unbekannt'}")
+        return False
+    return True
+
+
+def _ingest_done(clip: dict, event: str, detail: str, stage: str) -> None:
+    clip["attempts"] = 0
+    _set_issue(clip, "sticky")  # Only a failed job can be left here; the file now exists.
+    _event(clip, event, detail)
+    _enter(clip, stage)
+    _update_activity(clip, _context())  # Own context: general notes do not belong into the ingest list.
+    clip["status"] = _status(clip)
+
+
+def _ingest_master(clip: dict, folder: str, name: str, ctx: dict) -> bool:
+    """Enter one master for a clip waiting for restore; returns True if entered."""
+    path, master = _join(folder, name), clip["files"]["master"]
     head = f"{path}; {_clip_text(clip)}"
     if master and master["source"] == ingest_source and _normalize(master["folder"]) == _normalize(folder) and \
             [item.casefold() for item in master["names"]] == [name.casefold()]:
@@ -2184,40 +2212,63 @@ def _ingest_clip(clip: dict, folder: str, name: str, ctx: dict) -> bool:
     if clip["ready"] or clip["stage"] != "restore":
         _issue(ctx, "ingest_info", "Clip nicht mehr im Restore (unverändert)", name, f"{head}; Stand: {_position(clip)}")
         return False
-    if sticky and sticky["category"] != job_failed:
-        _issue(ctx, "ingest_error", "Clip inaktiv", name, f"{head}; {sticky['category']}: {sticky['detail']}")
-        return False
-    if not _withdraw(clip):
-        job = clip["job"]
-        _issue(ctx, "ingest_error", "Restore-Job läuft oder wurde gerade übernommen", name,
-               f"{head}; Job {job['id']} bei {job.get('worker') or 'unbekannt'}")
+    if not _ingest_ready(clip, head, name, ctx):
         return False
     clip["files"]["master"] = {"folder": folder, "names": [name], "source": ingest_source, "last_seen_at": _now()}
-    clip["attempts"] = 0
-    _set_issue(clip, "sticky")  # Only a failed restore can be set here; the master now exists.
-    _event(clip, "Restore abgeschlossen – Master per Ingest", path)
-    _enter(clip, "transcode")
-    _update_activity(clip, _context())  # Own context: general notes do not belong into the ingest list.
-    clip["status"] = _status(clip)
+    _ingest_done(clip, "Restore abgeschlossen – Master per Ingest", path, "transcode")
     return True
 
 
-def _ingest_group(files: list[tuple[str, int]], clips: list[dict], folder: str, ctx: dict) -> bool:
-    """Check one DEFA-ID of the master folder; returns True if a clip was changed."""
+def _ingest_proxy(clip: dict, folder: str, name: str, ctx: dict) -> bool:
+    """Move one proxy, renamed by proxy_name, into the QC inbox of a clip before QC; returns True if entered."""
+    path, target_folder, target = _join(folder, name), _qc_inbox(clip["collection"]), _proxy_name(clip)
+    head = f"{path}; {_clip_text(clip)}"
+    if clip["ready"] or clip["stage"] == "qc":
+        _issue(ctx, "ingest_info", "Clip schon in QC oder bereit (unverändert)", name, f"{head}; Stand: {_position(clip)}")
+        return False
+    if not target:
+        _issue(ctx, "ingest_error", veritone_missing, name, f"{head}; zuerst update-index")
+        return False
+    try:
+        target_path = _safe_work_path(target_folder) / target
+        conflict = os.path.lexists(target_path)
+    except (OSError, ValueError) as exc:
+        _issue(ctx, "ingest_error", "QC-Eingang nicht nutzbar", name, f"{head}; {exc}")
+        return False
+    if conflict:
+        _issue(ctx, "ingest_error", "Namenskonflikt im QC-Eingang", name, f"{head}; {target_folder}/{target} existiert bereits")
+        return False
+    if not _ingest_ready(clip, head, name, ctx):
+        return False
+    restored = clip["stage"] == "restore"
+    try:
+        target_path.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(Path(folder) / name, target_path)  # Windows refuses an existing target.
+    except OSError as exc:
+        _issue(ctx, "ingest_error", "Verschieben nicht möglich", name, f"{head}; {exc}")
+        return False
+    clip["files"]["proxy"] = _file_entry(target_folder, target, ingest_source)
+    _ingest_done(clip, f"{'Restore und Transcode' if restored else 'Transcode'} abgeschlossen – Proxy per Ingest",
+                 f"{path} → {target_folder}/{target}", "qc")
+    return True
+
+
+def _ingest_group(key: str, files: list[tuple[str, int]], clips: list[dict], folder: str, enter, ctx: dict) -> bool:
+    """Check one DEFA-ID of the ingest folder; returns True if a clip took the file."""
     names = [name for name, _ in files]
     head = _join(folder, names[0])
     if len(files) > 1:
-        detail = _detail(f"DEFA-ID={_master_defa_id(names[0])}", matches=[_join(folder, name) for name in names])
+        detail = _detail(f"DEFA-ID={key.upper()}", matches=[_join(folder, name) for name in names])
         for name in names:
-            _issue(ctx, "ingest_error", "Mehrere Masterdateien mit derselben DEFA-ID", name, detail)
+            _issue(ctx, "ingest_error", "Mehrere Dateien mit derselben DEFA-ID", name, detail)
     elif not files[0][1]:
-        _issue(ctx, "ingest_error", "Masterdatei ist leer", names[0], head)
+        _issue(ctx, "ingest_error", "Datei ist leer", names[0], head)
     elif not clips:
         _issue(ctx, "ingest_info", "DEFA-ID nicht in der JSON", names[0], head)
     elif len(clips) > 1:
         _issue(ctx, "ingest_error", "DEFA-ID mehrfach in der JSON", names[0], _detail(head, matches=[_clip_text(clip) for clip in clips]))
     else:
-        return _ingest_clip(clips[0], folder, names[0], ctx)
+        return enter(clips[0], folder, names[0], ctx)
     return False
 
 
@@ -2233,7 +2284,7 @@ def _update_index() -> None:
     before, token = len(state["clips"]), _veritone_token()
     found = _search_clips(mapping, ctx)
     found, dropped = _intersect(found, _veritone_clip_ids(mapping, token, ctx), mapping, ctx)
-    _reconcile(state, found, ctx, dropped)
+    filled = _reconcile(state, found, ctx, dropped)
     ffe_counts = _apply_ffe(state, entries, ctx)
     index_issues = [item for item in ctx["issues"] if item["section"] in index_sections]
     counts = {section: len({item["key"] for item in index_issues if item["section"] == section}) for section in index_sections}
@@ -2245,8 +2296,9 @@ def _update_index() -> None:
     _keep_notes(state, ctx["issues"])
     state["updated_at"] = _now()
     _save_state(state)
-    _log(f"Index aktualisiert: {len(state['clips']) - before} Clips neu aufgenommen, {len(state['clips'])} in der JSON; "
-         f"{counts['skipped']} nicht aufgenommen; {counts['deviation']} Abweichungen; {counts['veritone_only']} nur bei Veritone"
+    _log(f"Index aktualisiert: {len(state['clips']) - before} Clips neu aufgenommen, {filled} Clips ergänzt, "
+         f"{len(state['clips'])} in der JSON; {counts['skipped']} nicht aufgenommen; {counts['deviation']} Abweichungen; "
+         f"{counts['veritone_only']} nur bei Veritone; {counts['veritone_multi']} Veritone-ID uneindeutig"
          f"; {_ffe_text(ffe_counts)}{_details(error_list, ambiguous_list)}; Dauer: {perf_counter() - started:.1f} s.")
 
 
@@ -2268,34 +2320,40 @@ def _update_ffe() -> None:
          f"Dauer: {perf_counter() - started:.1f} s.")
 
 
-def _ingest() -> None:
-    """Match the master files in master_dir via DEFA-ID with the JSON and enter them; only started by the command."""
-    started, folder = perf_counter(), cfg["master_dir"]
-    _log(f"Ingest gestartet: {folder}")
+def _ingest(kind: str) -> None:
+    """ingest-master or ingest-proxy: match the files in <kind>_dir via DEFA-ID with the JSON; only started by the command."""
+    started, folder, command, master = perf_counter(), cfg[f"{kind}_dir"], f"ingest-{kind}", kind == "master"
+    _log(f"{command} gestartet: {folder}")
     if not state_path.exists():
         raise RuntimeError("Noch keine JSON – zuerst 'update-index' oder 'run'.")
     if not Path(folder).is_absolute():
-        raise ValueError(f"[ingest] master_dir muss ein vollständiger Pfad sein: {folder}; Zustand unverändert.")
+        raise ValueError(f"[ingest] {kind}_dir muss ein vollständiger Pfad sein: {folder}; Zustand unverändert.")
     _check_root()
     if not Path(folder).is_dir():
-        raise FileNotFoundError(f"Master-Ordner nicht erreichbar: {folder}; Zustand unverändert.")
+        raise FileNotFoundError(f"Ordner nicht erreichbar: {folder}; Zustand unverändert.")
     state, ctx = _load_state(), _context()
     if state.get("cleanup", {}).get("pending"):
         raise RuntimeError("Bereinigung noch unvollständig; zuerst 'delete-folder' erneut ausführen.")
     by_id = defaultdict(list)
     for clip in sorted(state["clips"].values(), key=lambda item: int(item["clip_id"])):
         by_id[_normalize(clip["identifier"])].append(clip)
-    groups, checked = _ingest_files(folder, ctx)
-    entered = sum(_ingest_group(files, by_id.get(key, []), folder, ctx) for key, files in groups.items())
-    if entered:
+    if master:
+        parse, suffix, schema, enter, stage = _defa_id, None, "<DEFA-ID>__<Titel>", _ingest_master, "Transcode"
+    else:
+        parse, suffix, schema, enter, stage = (_proxy_defa_id, Path(cfg["proxy_name"]).suffix,
+                                               f"{cfg['proxy_prefix']}__<DEFA-ID>__<Titel>", _ingest_proxy, "QC")
+    groups, checked = _ingest_files(folder, parse, suffix, schema, ctx)
+    try:
+        entered = sum(_ingest_group(key, files, by_id.get(key, []), folder, enter, ctx) for key, files in groups.items())
+    finally:  # Files may already be moved; the JSON must follow.
         state["updated_at"] = _now()
         _save_state(state)
     when = datetime.now().astimezone()
-    error_list = f"{_file_stamp('ingest', when)}_errors.txt" if ctx["issues"] else None
+    error_list = f"{_file_stamp(command, when)}_errors.txt" if ctx["issues"] else None
     if error_list:
-        _write_new(error_dir / error_list, _format_errors(ctx["issues"], when, "Ingest-Fehlerliste", ingest_sections))
+        _write_new(error_dir / error_list, _format_errors(ctx["issues"], when, f"{command}-Fehlerliste", ingest_sections))
     counts = {section: len({item["key"] for item in ctx["issues"] if item["section"] == section}) for section in ingest_sections}
-    _log(f"Ingest abgeschlossen: {checked} Dateien geprüft, {entered} eingetragen (weiter an Transcode), "
+    _log(f"{command} abgeschlossen: {checked} Dateien geprüft, {entered} eingetragen (weiter an {stage}), "
          f"{counts['ingest_error']} nicht eingetragen (Fehler), {counts['ingest_info']} Hinweise{_details(error_list)}; "
          f"Dauer: {perf_counter() - started:.1f} s.")
 
@@ -2323,7 +2381,6 @@ def _report(kind: str) -> Path:
     view = copy.deepcopy(state)  # The report only looks; jobs and moves stay with 'run'.
     _process(view, mapping, prio, ctx, writing=False)
     ctx["listings"].clear()
-    ctx["indexes"].clear()
     _leftovers(view, mapping, ctx)
     _final_audit(state, mapping, ctx)
     totals = _totals(view, mapping)
@@ -2396,8 +2453,7 @@ def _auto_due(now: datetime) -> bool:
 
 
 def _command(raw: str) -> str:
-    key = "-".join(raw.casefold().replace("_", " ").replace("-", " ").split())
-    return command_aliases.get(key, key)
+    return "-".join(raw.casefold().replace("_", " ").replace("-", " ").split())
 
 
 def _help_text() -> str:
@@ -2512,8 +2568,8 @@ def main(argv: list[str] | None = None) -> None:
                 pending_delete = _begin_delete()
             elif command == "update-ffe":
                 _update_ffe()
-            elif command == "ingest":
-                _ingest()
+            elif command in ("ingest-master", "ingest-proxy"):
+                _ingest(command.removeprefix("ingest-"))
             else:
                 _update_index()
             if command in ("run", "auto-report"):
