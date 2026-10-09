@@ -20,7 +20,7 @@ Dieses Protokoll beschreibt alles, was zwischen Marathon und den Workern ausgeta
 
 | Komponente | Version | Dateien |
 |---|---|---|
-| Marathon | 1.12.0 | `marathon.py`, `core/` |
+| Marathon | 1.14.0 | `marathon.py`, `core/` |
 | Marathon-Adapter (gemeinsamer Teil aller Worker-Adapter) | 1.1.1 | `marathon/marathon_adapter.py` |
 | QC Marathon (QC-Adapter) | 2.1.1 | `marathon/qc_marathon.py`, `marathon/configs/` |
 | QC Worker | 2.1.0 | `qc_worker.py` |
@@ -132,7 +132,7 @@ Dateien mit 0 Byte oder auf `.tmp`, `.part`, `.partial` zählen nicht. Dateiname
 | QC `rejected` | Clip inaktiv „QC nicht bestanden“; Proxy bleibt im QC-Eingang |
 | `failed` oder Prüfung nach 3.4 fehlgeschlagen | Versuch zählt; Ausgang wird gelöscht; neuer Job bis `max_job_attempts`, danach Clip inaktiv „Job endgültig fehlgeschlagen“ |
 
-Danach archiviert Marathon Job-Datei und Report (`<job_id>.report.json`) in `<work_dir>/<stufe>/archiv/`. Reste im Ausgang werden bei `ok` und `rejected` nach `…/<stufe>/archiv/<job_id>.ausgang` verschoben.
+Danach archiviert Marathon Job-Datei und Report (`<job_id>.report.json`) in `<work_dir>/<stufe>/archiv/`. Reste im Ausgang werden bei `ok` und `rejected` nach `…/<stufe>/archiv/<job_id>.ausgang` verschoben. Ausnahme QC: Enthält der Ausgang genau eine Datei `*.aqc.json` und sonst nichts, wird sie als `<work_dir>/qc/archiv/<job_id>.aqc.json` archiviert und der leere Ausgang entfernt.
 
 ### 3.7 Heartbeat
 
@@ -176,7 +176,7 @@ Danach archiviert Marathon Job-Datei und Report (`<job_id>.report.json`) in `<wo
 - `preset`: `proxy_standard` bzw. `proxy_standard+ffe_tafel`.
 - Status: alle Tools bestanden `ok`, ein Tool nicht bestanden `rejected`, sonst `failed`.
 - `failed` „Job ungültig“ bei fehlendem `input`, fehlendem oder nicht booleschem `ffe_tafel`, oder `ffe_tafel: true` ohne `ffe_reference_image`.
-- Ausgang: je Clip `<clip>.aqc.json`.
+- Ausgang: je Clip `<clip>.aqc.json` (Prüfbericht, Aufbau 3.12).
 
 **Restore, Transcode**: nicht dokumentiert – beim ersten Thread zum jeweiligen Worker ergänzen.
 
@@ -184,8 +184,24 @@ Danach archiviert Marathon Job-Datei und Report (`<job_id>.report.json`) in `<wo
 
 - Test-Jobs sind Jobs nach 3.2 bis 3.5 in denselben Ordnern `offen/`, `laufend/`, `fertig/`; Worker behandeln sie wie jeden Job.
 - Abweichend: `output_folder` = `<work_dir>/test/<stufe>/ausgang/<job_id>`; zusätzliches Feld `test`; alle übrigen Felder können vom Testplan ersetzt sein, auch durch ungültige Werte.
-- Marathon wertet Reports von Test-Jobs nicht nach 3.6 aus: Job-Datei und Report werden archiviert, der Ausgang bleibt liegen, kein neuer Job bei `failed`.
+- Marathon wertet Reports von Test-Jobs nicht nach 3.6 aus: Job-Datei und Report werden archiviert, der Ausgang bleibt liegen, kein neuer Job bei `failed`. Für den Testbericht liest Marathon den QC-Prüfbericht (3.12) aus dem Ausgang.
 - Der Job-Zyklus lässt Test-Jobs in `offen/` und `laufend/` sowie ihre Reports liegen; der Test-Modus lässt Produktions-Jobs und ihre Reports liegen.
+
+### 3.12 QC-Prüfbericht
+
+- Datei `<clip>.aqc.json` im `output_folder` eines QC-Jobs (3.10). Marathon liest sie nur, für Detail- und Testbericht bei `rejected`; der Ablauf nach 3.6 hängt nicht von ihr ab.
+- Gelesene Felder:
+
+| Feld | Typ | Inhalt |
+|---|---|---|
+| `tools` | list | je Prüftool ein Objekt |
+| `tools[].label` | str | Tool und Prüfplan-Schlüssel, z. B. `stream_specs(video_1080p)`; ersatzweise `tools[].name` |
+| `tools[].status` | str | `BESTANDEN`; jeder andere Wert gilt als nicht bestanden |
+| `tools[].message` | str/null | Grund, wenn `failures` leer ist |
+| `tools[].failures` | list | je Abweichung `criterion`, `expected`, `actual`, `stream`, `channel`, `tc` (jeweils str/int/null) |
+| `tools[].info` | list of str | Hinweise; ein Eintrag mit `Ist-Werte:` enthält die gemessenen Werte, z. B. `Stream 0 Ist-Werte: width=1920, …` |
+
+- Weitere Felder werden ignoriert. Fehlt die Datei, ist sie unlesbar oder fehlt `tools`, meldet Marathon „Prüfbericht fehlt“.
 
 ## 4. Anträge
 
@@ -216,10 +232,19 @@ Vorlage:
 - Version: Marathon 1.11.0; keine neue `schema_version`
 - Übergang: bestehende Worker bleiben unverändert lauffähig
 
+### CR-003 QC-Prüfbericht für Berichte
+
+- Von → an: Marathon → QC Worker
+- Stand: erledigt
+- Inhalt: Marathon liest den bestehenden Prüfbericht `<clip>.aqc.json` nach 3.12 (Detail- und Testbericht) und archiviert einen QC-Ausgang, der nur den Prüfbericht enthält, als `<work_dir>/qc/archiv/<job_id>.aqc.json` (3.6). Der QC Worker braucht keine Änderung; die Felder aus 3.12 dürfen nur mit neuer Version und Eintrag in Abschnitt 5 umbenannt oder entfernt werden.
+- Version: Marathon 1.14.0; keine neue `schema_version`
+- Übergang: bestehende Worker bleiben unverändert lauffähig
+
 ## 5. Änderungsprotokoll
 
 | Datum | Antrag | Änderung |
 |---|---|---|
+| 2026-10-09 | CR-003 | Marathon 1.14.0: liest den QC-Prüfbericht (3.12) für Detail- und Testbericht; QC-Ausgang mit nur dem Prüfbericht wird als `<work_dir>/qc/archiv/<job_id>.aqc.json` archiviert (3.6); Worker unverändert |
 | 2026-10-09 | – | QC Marathon 2.1.1: Prüfbericht in Konsole und Log ab `<work_dir>` gekürzt; Schnittstelle unverändert |
 | 2026-10-09 | – | Worker: detaillierte Konsolenausgaben; Marathon-Adapter 1.1.1 mit Hilfe `status(message)`, QC Marathon 2.1.0, QC Worker 2.1.0, AQC 0.3.1; Schnittstelle zu Marathon unverändert |
 | 2026-10-09 | – | Marathon 1.12.0: Befehl `test-qc` erzeugt Test-Jobs nach 3.11 aus der JSON; Schnittstelle unverändert |

@@ -15,7 +15,8 @@ Worker rules (paths relative to the share root, "/" as separator):
   "ffe_reference_image", Transcode jobs list all FFE title clips in "ffe_reference_clips". Marathon keeps these
   files in <work_dir>/worker/; workers only read them and never write into that folder except their heartbeat.
 - Marathon moves results on (a new master into master_dir, never overwriting), archives job, report and output
-  leftovers, deletes failed partial results and withdrawn jobs.
+  leftovers (a lone QC test report as <work_dir>/qc/archiv/<job_id>.aqc.json), deletes failed partial results and
+  withdrawn jobs. Every collected production report goes into the job journal (core.details).
 - Test jobs (core.testrun) share the pools; the job loop skips their job files and reports (test_ids).
 """
 # --------- IMPORTS ---------
@@ -23,8 +24,8 @@ import json
 from pathlib import Path
 
 from .constants import (
-    busy_suffixes, delivery_blocked, ffe_flag, ingest_source, invalid_path_chars, job_failed, limit_keys, master_blocked,
-    missing_job_grace, outbox, protocol_suffixes, qc_rejected, stage_labels, stages)
+    blocked_outcome, busy_suffixes, delivery_blocked, ffe_flag, ingest_source, invalid_path_chars, job_failed, limit_keys,
+    master_blocked, missing_job_grace, outbox, protocol_suffixes, qc_rejected, qc_report_suffix, stage_labels, stages)
 from .config import cfg, ignored
 from .util import age, clip_text, file_name, format_detail, issue, normalize, now, stamp
 from .layout import final_folder, job_folder, join, master_folder, qc_inbox, share_path, stage_folder
@@ -37,6 +38,7 @@ from .ffe import reference_clips, reference_image, sync_references
 from .editshare import request_field, write_fields
 from .workers import read_workers
 from .audit import check_files, report_problem, status, update_activity
+from .details import record_job
 
 
 # --------- FUNC ---------
@@ -50,18 +52,29 @@ def archive_job(job: dict) -> str | None:
     return None
 
 
-def _finish_output(job: dict, keep: bool, ctx: dict) -> None:
-    """Archive (keep=True) or delete whatever is left in the job's output folder."""
-    path = share_path(job["output_folder"])
+def _finish_output(job: dict, keep: bool, ctx: dict) -> str | None:
+    """Archive (keep=True) or delete whatever is left in the job's output folder; returns the archived file or folder.
+
+    A QC output holding only its test report is archived flat as <work_dir>/qc/archiv/<job_id>.aqc.json.
+    """
+    out = job["output_folder"]
+    path = share_path(out)
     if not path.is_dir():
-        return
-    if keep and any(path.iterdir()):
+        return None
+    if keep and (items := list(path.iterdir())):
+        lone = items[0] if len(items) == 1 and items[0].is_file() else None
+        flat = job["stage"] == "qc" and lone is not None and lone.name.casefold().endswith(qc_report_suffix)
+        source, target, name = (f"{out}/{lone.name}", f"{job_folder('qc')}/archiv", f"{job['id']}{qc_report_suffix}") if flat \
+            else (out, output_archive(out), f"{job['id']}.{outbox}")
         try:
-            move(job["output_folder"], output_archive(job["output_folder"]), f"{job['id']}.{outbox}")
+            moved = move(source, target, name)
         except OSError as exc:
-            issue(ctx, "note", "Ausgang nicht archivierbar (bleibt liegen)", job["output_folder"], f"{job['output_folder']}: {exc}")
-        return
-    remove_tree(job["output_folder"], ctx, "Ausgang nicht löschbar (bleibt liegen)")
+            issue(ctx, "note", "Ausgang nicht archivierbar (bleibt liegen)", out, f"{out}: {exc}")
+            return None
+        rmdir(out)
+        return f"{target}/{name}" if moved else None
+    remove_tree(out, ctx, "Ausgang nicht löschbar (bleibt liegen)")
+    return None
 
 
 def _master_problem(clip: dict, name: str, delivered: dict[str, str]) -> str | None:
@@ -124,7 +137,8 @@ def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
     return None
 
 
-def _apply_report(clip: dict, job: dict, report: dict, worker: str | None, ctx: dict) -> None:
+def _apply_report(clip: dict, job: dict, report: dict, worker: str | None, ctx: dict) -> tuple[str, str, str | None]:
+    """Take over a report; returns journal status, result text and archived output."""
     stage, label = job["stage"], stage_labels[job["stage"]]
     status, result = report["status"], str(report.get("result") or "").strip()
     by = f"Worker {worker or 'unbekannt'}"
@@ -144,18 +158,17 @@ def _apply_report(clip: dict, job: dict, report: dict, worker: str | None, ctx: 
             category = master_blocked if isinstance(exc, MasterBlocked) else delivery_blocked
             set_issue(clip, "sticky", category, job_text(str(exc)))
             add_event(clip, category, str(exc))
-            _finish_output(job, True, ctx)
-            return
+            return blocked_outcome, f"Marathon: {exc}", _finish_output(job, True, ctx)
         if problem is None:
             clip["attempts"] = 0
-            _finish_output(job, True, ctx)
-            return
-        status, result = "failed", problem
+            return "ok", result, _finish_output(job, True, ctx)
+        status, result, report_result = "failed", problem, f"Marathon: {problem}"
+    else:
+        report_result = result
     if status == "rejected":
         set_issue(clip, "sticky", qc_rejected, job_text(result))
         add_event(clip, qc_rejected, f"{by}: {result}")
-        _finish_output(job, True, ctx)
-        return
+        return "rejected", report_result, _finish_output(job, True, ctx)
     clip["attempts"] += 1
     add_event(clip, f"{label}-Job fehlgeschlagen", f"{by}: {result}")
     _finish_output(job, False, ctx)
@@ -163,6 +176,7 @@ def _apply_report(clip: dict, job: dict, report: dict, worker: str | None, ctx: 
         set_issue(clip, "sticky", job_failed, job_text(result))
     else:
         issue(ctx, "note", "Job fehlgeschlagen – neuer Versuch", clip["clip_id"], format_detail(clip_text(clip), job_text(result)))
+    return "failed", report_result, None
 
 
 def _retire(folder: str, job_id: str, ctx: dict) -> None:
@@ -198,8 +212,15 @@ def _collect_reports(folder: str, jobs: dict[str, dict], ctx: dict, test_ids: fr
             _retire(folder, report["job_id"], ctx)
             continue
         job = jobs.pop(report["job_id"])["job"]
-        _apply_report(clip, job, report, archive_job(job) or job.get("worker"), ctx)
+        worker = archive_job(job) or job.get("worker")
+        outcome, result, output = _apply_report(clip, job, report, worker, ctx)
         move(relative, f"{folder}/archiv", archived)
+        failed = outcome == "failed"
+        record_job({"at": now(), "stage": job["stage"], "job_id": job["id"], "clip_id": clip["clip_id"],
+                    "identifier": clip["identifier"], "title": clip["title"], "collection": clip["collection"],
+                    "status": outcome, "result": result, "preset": report.get("preset"), "worker": worker,
+                    "attempt": clip["attempts"] if failed else None, "max_attempts": cfg["max_job_attempts"] if failed else None,
+                    "final": failed and clip["attempts"] >= cfg["max_job_attempts"], "output": output})
 
 
 def _locate_job(clip: dict, ctx: dict) -> None:

@@ -25,6 +25,9 @@ report_statuses = ("ok", "failed", "rejected")
 system_files = frozenset({"thumbs.db", "desktop.ini", ".ds_store"})
 busy_suffixes = (".tmp", ".part", ".partial")
 protocol_suffixes = (".json", ".txt", ".log")
+qc_report_suffix = ".aqc.json"  # AQC test report of the QC worker, one per clip in the output folder.
+aqc_passed, aqc_actual_marker = "BESTANDEN", "Ist-Werte:"  # Tool status and info prefix of measured values in it.
+blocked_outcome = "blockiert"  # Journal status of an ok report whose results Marathon could not move on.
 prio_columns = tuple(f"Prio {stage_labels[stage]}" for stage in stages)
 queue_columns = tuple(f"Queue {stage_labels[stage]}" for stage in stages)
 count_columns = ("Gesamt", "Bereit", *queue_columns)
@@ -71,7 +74,7 @@ commands_help = {
     "test": "Test-Modus: Test-Jobs aus der Testliste auslegen und ihre Reports einsammeln; JSON und Dateien bleiben unverändert",
     "test-qc": "QC-Testliste aus der JSON erzeugen (alle Clips mit vorhandenem Proxy im QC-Eingang) und Test-Lauf starten",
     "test-cancel": "Offenen Test-Lauf beenden: nicht übernommene Test-Jobs zurückziehen, Testbericht schreiben",
-    "auto-report": "Täglichen Auto-Bericht einschalten (ab auto_report_time)",
+    "auto-report": "Täglichen Auto-Bericht einschalten (ab auto_report_time), danach je Stufe ein Detailbericht",
     "auto-report-off": "Täglichen Auto-Bericht ausschalten",
     "report": "Manuellen Bericht sofort erstellen",
     "create-folders": "Ordnerstruktur aller Kollektionen anlegen",

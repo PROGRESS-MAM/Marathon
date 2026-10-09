@@ -24,6 +24,7 @@ from .state import load_state, save_state
 from .ffe import sync_references
 from .audit import report_problem
 from .jobs import archive_job, job_payload
+from .details import block, clock, head, qc_findings, qc_rows
 
 
 # --------- STATE ---------
@@ -238,20 +239,37 @@ def _production_jobs(data: dict) -> int:
 
 
 # --------- REPORT ---------
+def _common(values: list) -> object | None:
+    """The single value shared by all entries, else None."""
+    return values[0] if values and len(set(values)) == 1 else None
+
+
 def _summary(run: dict, when: datetime) -> str:
-    head = ("Nr", "Test", "Stufe", "clip_id", "Status", "Preset", "Worker", "Job", "Ausgang", "Ergebnis")
-    rows = []
-    for case in run["cases"]:
-        result, job = case["result"] or {}, case["job"] or {}
-        rows.append((str(case["number"]), case["name"], stage_labels[case["stage"]], case["clip_id"],
-                     *(str(result.get(key) or "–") for key in ("status", "preset", "worker")),
-                     job.get("id") or "–", job.get("output_folder") or "–", result.get("result") or ""))
-    lines = [f"{app_name} {app_version} | Test-Lauf {run['id']} | {when.isoformat(timespec='seconds')}", "",
-             f"Testliste: {run['test_file']}; gestartet: {run['started_at']}; {_progress(run)}", "",
-             " | ".join(head), *(" | ".join(row).rstrip() for row in rows)]
+    cases = run["cases"]
+    results = [case["result"] or {} for case in cases]
+    by_worker = Counter(result["status"] for result in results if result.get("report"))
+    by_marathon = Counter(result["status"] for result in results if result and not result.get("report"))
+    stage = _common([stage_labels[case["stage"]] for case in cases])
+    preset = _common([result["preset"] for result in results if result.get("preset")])
+    outputs = _common([case["job"]["output_folder"].rsplit("/", 1)[0] for case in cases if case["job"]])
+    worker_text = ", ".join(f"{status} {count}" for status, count in sorted(by_worker.items()))
+    rows = [("Testliste", run["test_file"]), ("Gestartet", clock(run["started_at"])), ("Bericht", f"{when:%Y-%m-%d %H:%M:%S}"),
+            ("Tests", len(cases)),
+            ("Ergebnisse", f"{sum(by_worker.values())}" + (f"  ({worker_text})" if worker_text else "")),
+            *((status.capitalize(), count) for status, count in sorted(by_marathon.items())),
+            ("Stufe", stage), ("Preset", preset), ("Ausgang", f"{outputs}/<Job>" if outputs else None)]
+    lines = head(f"{app_name} {app_version} · Test-Lauf {run['id']}", [row for row in rows if row[1] is not None])
+    for case, result in zip(cases, results):
+        job = case["job"] or {}
+        facts = [("clip_id", case["clip_id"]), ("Stufe", None if stage else stage_labels[case["stage"]]),
+                 ("Preset", None if preset else result.get("preset")), ("Worker", result.get("worker"))]
+        rows = [("Job", job.get("id")), ("Ausgang", None if outputs else job.get("output_folder")), ("Ergebnis", result.get("result"))]
+        if result.get("status") == "rejected" and case["stage"] == "qc":
+            rows += qc_rows(qc_findings(job.get("output_folder")))
+        lines += block(case["number"], result.get("status") or "offen", case["name"], facts, rows)
     if run["notes"]:
-        lines += ["", f"Hinweise: {len(run['notes'])}", *(f"  {note}" for note in run["notes"])]
-    return "\n".join(lines) + "\n"
+        lines += [f"Hinweise: {len(run['notes'])}", *(f"  {note}" for note in run["notes"])]
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def _finish(run: dict) -> None:

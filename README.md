@@ -32,7 +32,7 @@ res/
 
 `marathon.py` und `core/` gehören immer zusammen: Bei einem Update beide vollständig ersetzen; `res/`, `log/`, `state/`, `reports/` und `test/` bleiben unverändert.
 
-`log/`, `state/`, `reports/`, `reports/errors/` und `test/` legt Marathon selbst an. Der Index liegt in `state/marathon.json` (JSON-Version 7), der Stand des Test-Modus in `test/test.json`.
+`log/`, `state/`, `reports/`, `reports/errors/` und `test/` legt Marathon selbst an. Der Index liegt in `state/marathon.json` (JSON-Version 7), das Job-Protokoll für die Detailberichte in `state/journal_<stufe>.jsonl`, der Stand des Test-Modus in `test/test.json`.
 
 ## Start
 
@@ -53,7 +53,7 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 | `test` | Test-Modus: Test-Lauf aus der Testliste starten oder offenen Test-Lauf fortsetzen; hält die Job-Schleife an (siehe Test-Modus) |
 | `test-qc` | QC-Testliste aus der JSON erzeugen (alle Clips mit vorhandenem Proxy im QC-Eingang) und Test-Lauf starten (siehe Test-Modus) |
 | `test-cancel` | Offenen Test-Lauf beenden: nicht übernommene Test-Jobs zurückziehen, Testbericht schreiben |
-| `auto-report` | Täglichen Auto-Bericht einschalten (ab `auto_report_time`) |
+| `auto-report` | Täglichen Auto-Bericht einschalten (ab `auto_report_time`); danach je Stufe ein Detailbericht |
 | `auto-report-off` | Täglichen Auto-Bericht ausschalten |
 | `report` | Manuellen Bericht sofort erstellen |
 | `create-folders` | Ordnerstruktur aller Kollektionen anlegen und FFE-Referenzen bereitstellen |
@@ -159,7 +159,8 @@ Maßgeblich ist der Wert beim Erstellen des Jobs.
 
 - Reihenfolge bei bestandenem QC: Proxy ausliefern, Master aus Restore löschen, EditShare-Feld setzen. Masterdateien aus `ingest-master` werden nie gelöscht.
 - Vor der Auslieferung muss der Proxy vorhanden und größer als 0 Byte sein.
-- QC nicht bestanden: Clip inaktiv (`QC nicht bestanden`), Eintrag in der Fehlerliste des Berichts.
+- QC nicht bestanden: Clip inaktiv (`QC nicht bestanden`), Eintrag in der Fehlerliste des Berichts, Gründe im Detailbericht QC.
+- Archiv: Job-Datei und Report liegen in `<work_dir>/<stufe>/archiv/`. Enthält der QC-Ausgang nur den Prüfbericht, liegt er dort als `<job_id>.aqc.json`; sonst wird der Ausgang als Ordner `…/<stufe>/archiv/<job_id>.ausgang` archiviert.
 
 **EditShare-Feld:**
 
@@ -167,6 +168,46 @@ Maßgeblich ist der Wert beim Erstellen des Jobs.
 - Zugang über `cred_file`; der FLOW-Benutzer braucht Schreibrecht auf das Feld.
 - Scheitert das Setzen, bleibt eine offene Aufgabe in der JSON (`editshare`), und Marathon versucht es in jedem Job-Zyklus erneut. Ab 3 gescheiterten Zyklen steht der Clip im Bericht unter „EditShare-Feld nicht gesetzt“; er zählt weiter als bereit.
 - Proxys, die vor Version 1.10.0 ausgeliefert wurden, bekommen das Feld nicht nachträglich.
+
+## Detailberichte
+
+Nur mit eingeschaltetem `auto-report`: Direkt nach jedem täglichen Auto-Bericht schreibt Marathon je Stufe einen Detailbericht. Der Auto-Bericht selbst bleibt unverändert; `report` erzeugt keine Detailberichte.
+
+- Dateien: `reports/details_restore_<stempel>.txt`, `reports/details_transcode_<stempel>.txt`, `reports/details_qc_<stempel>.txt`; jeden Tag alle drei, auch ohne Jobs.
+- Zeitraum: alle Jobs, deren Report die Job-Schleife (`run`) seit dem letzten Detailbericht der Stufe eingesammelt hat, ohne Lücke und ohne Überschneidung. Test-Jobs zählen nicht.
+- Schlägt ein Detailbericht fehl, steht das im Protokoll; der nächste Detailbericht der Stufe deckt den Zeitraum mit ab.
+- Erfasst werden Jobs ab Version 1.14.0.
+
+**Kopf:**
+
+| Stufe | Zahlen |
+| --- | --- |
+| Restore | Jobs insgesamt, ok, Fehlgeschlagen (davon endgültig) |
+| Transcode | Jobs insgesamt, ok, Fehlgeschlagen (davon endgültig), Blockiert |
+| QC | Jobs insgesamt, QC bestanden, QC nicht bestanden, QC-Fehler (davon endgültig), Blockiert |
+
+QC zusätzlich: „Nicht bestanden nach Kriterium“ – wie oft jedes Kriterium bei den abgelehnten Jobs durchgefallen ist (je Job einmal gezählt), häufigstes zuerst.
+
+**Details:** ein Block je Job, der nicht ok war, in der Reihenfolge des Einsammelns. Bestandene Jobs stehen nur als Zahl im Kopf.
+
+~~~text
+#1  REJECTED  DEFA01078 ... bißchen Liebe
+    clip_id 412505 · Kollektion DEFA Dokumentation · Preset proxy_standard · Worker PP-DESKTOP-05
+    Job      20261009T121652905452__412505__qc1
+    Zeit     2026-10-09 14:17:40
+    Ergebnis 50566716_412505_10Mbit.mp4: nicht bestanden (1 von 3 Tools): stream_specs(video_1080p)
+    Fehler   stream_specs(video_1080p): fps erwartet 24 | 25, gefunden 50 (Stream 0)
+    Ist      Stream 0: width=1920, height=1080, scan=progressive, fps=50, codec=h264, bitrate=10.04M
+    Ablage   .marathon/qc/archiv/20261009T121652905452__412505__qc1.aqc.json
+~~~
+
+| Status | Bedeutung |
+| --- | --- |
+| `REJECTED` | QC nicht bestanden; `Fehler` (Soll/Ist je Abweichung) und `Ist` bzw. `Info` aus dem Prüfbericht; „Prüfbericht fehlt“, wenn keiner lesbar ist |
+| `FAILED` | vom Worker als `failed` gemeldet oder von Marathon verworfen (Ergebnis beginnt mit `Marathon:`); `Versuch n von max_job_attempts`, „(endgültig)“ beim letzten Versuch |
+| `BLOCKIERT` | Ergebnis ok, aber Auslieferung oder neuer Master blockiert (`Marathon: …`) |
+
+`Ablage` zeigt den archivierten Ausgang des Jobs, sofern vorhanden.
 
 ## Ingest (vorhandene Master und Proxys)
 
@@ -314,7 +355,11 @@ python marathon.py test-qc
 - Liegen beim Start noch Produktions-Jobs in `offen` oder `laufend`, meldet Marathon das: Worker nehmen ältere Jobs zuerst.
 - `delete-folder` ist gesperrt, solange ein Test-Lauf offen ist; danach löscht es auch `<work_dir>/test/` mit dem Arbeitsordner.
 
-**Testbericht:** Kopfzeile mit Testliste und Zählung, dann je Test `Nr | Test | Stufe | clip_id | Status | Preset | Worker | Job | Ausgang | Ergebnis`, am Ende Hinweise.
+**Testbericht** (`reports/test_<stempel>.txt`):
+
+- Kopf: Testliste, Start, Bericht, Anzahl Tests, `Ergebnisse` (vom Worker gemeldet, nach Status) und getrennt davon `Abgebrochen` bzw. `Nicht ausgelegt`. Sind Stufe, Preset oder Ausgangsordner bei allen Tests gleich, stehen sie nur im Kopf.
+- Je Test ein Block wie im Detailbericht: `#<Nr>  <STATUS>  <Test>`, dann clip_id, Worker, Job und Ergebnis. Bei abgelehnten QC-Tests zusätzlich `Fehler` und `Ist` aus dem Prüfbericht im Test-Ausgang.
+- Am Ende die Hinweise des Test-Laufs.
 
 | Status | Bedeutung |
 | --- | --- |
@@ -363,6 +408,8 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 - `reports/errors/<index|ffe>_<stempel>_ffe_uneindeutig.txt` – uneindeutige FFE-Treffer
 - `reports/errors/ingest-master_<stempel>_errors.txt` – nicht eingetragene Masterdateien und Hinweise von `ingest-master`
 - `reports/errors/ingest-proxy_<stempel>_errors.txt` – nicht übernommene Proxys und Hinweise von `ingest-proxy`
+- `reports/details_<restore|transcode|qc>_<stempel>.txt` – Detailberichte, täglich nach dem Auto-Bericht
 - `reports/test_<stempel>.txt` – Testbericht eines Test-Laufs
+- `state/journal_<stufe>.jsonl` – Job-Protokoll seit dem letzten Detailbericht; danach in `state/journal/details_<stufe>_<stempel>.jsonl`
 - `reports/errors/test-qc_<stempel>_errors.txt` – von `test-qc` übersprungene Clips
 - `test/test.json` – Stand des Test-Modus (offener Test-Lauf, IDs aller Test-Jobs); nicht löschen, solange Test-Jobs auf dem SMB liegen

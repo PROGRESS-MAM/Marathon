@@ -19,6 +19,7 @@ from .index import update_index
 from .jobs import process
 from .cleanup import begin_delete, delete_folders
 from .report import report
+from .details import write_details
 from .ingest import ingest
 from .testrun import cancel_test, start_qc_test, start_test, test_cycle, test_job_ids, test_status
 
@@ -127,6 +128,7 @@ def main(argv: list[str] | None = None) -> None:
                 try:
                     report("auto")
                     next_retry = None
+                    write_details()
                 except Exception as exc:
                     next_retry = now + timedelta(minutes=cfg["retry_minutes"])
                     log(f"Auto-Bericht fehlgeschlagen: {exc}; neuer Versuch in {cfg['retry_minutes']} min.")
