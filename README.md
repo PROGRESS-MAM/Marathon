@@ -61,6 +61,7 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 | `update-ffe` | Nur FFE-Liste mit der bestehenden JSON abgleichen, ohne Suche |
 | `ingest-master` | Masterdateien aus `master_dir` über die DEFA-ID abgleichen und eintragen (weiter an Transcode); nur auf Befehl |
 | `ingest-proxy` | Proxys aus `proxy_dir` über die DEFA-ID abgleichen, umbenannt in den QC-Eingang verschieben (weiter an QC); nur auf Befehl |
+| `retry-qc` | Alle Clips mit „QC nicht bestanden“ zur QC-Neuprüfung freigeben; Bestätigung mit `freigeben` (siehe QC-Neuprüfung) |
 | `delete-folder` | SMB-Arbeitsordner bereinigen; Index bleibt, Prozesszustand wird neu aufgebaut. Bei Clip-/Mediendateien Bestätigung mit `loeschen`; gesperrt bei offenem Test-Lauf |
 | `status` | Anzeigen, was eingeschaltet ist, und Stand des Test-Laufs |
 | `help` | Befehlsübersicht |
@@ -208,6 +209,18 @@ QC zusätzlich: „Nicht bestanden nach Kriterium“ – wie oft jedes Kriterium
 | `BLOCKIERT` | Ergebnis ok, aber Auslieferung oder neuer Master blockiert (`Marathon: …`) |
 
 `Ablage` zeigt den archivierten Ausgang des Jobs, sofern vorhanden.
+
+## QC-Neuprüfung (`retry-qc`)
+
+Gibt alle Clips mit „QC nicht bestanden“ erneut zur QC frei, z. B. nach einer geänderten QC-Metrik.
+
+- `retry-qc` zeigt zuerst eine Vorschau: Anzahl der Clips je Kollektion und Anzahl der übersprungenen. Erst `freigeben` führt die Freigabe aus; jede andere Eingabe bricht ab, ohne etwas zu ändern.
+- Freigegeben werden Clips in der Stufe QC ohne laufenden Job, deren Proxy im QC-Eingang liegt und nicht leer ist. Alle anderen stehen in `reports/errors/retry-qc_<stempel>_errors.txt`, Abschnitt „Nicht zur QC-Neuprüfung freigegeben“.
+- Die Clips behalten ihre ursprüngliche Eingangszeit. Die Job-Schleife legt die neuen QC-Jobs wie gewohnt nach Prioliste und `[limits] qc` aus; die Ergebnisse stehen im nächsten Detailbericht QC.
+- Im Verlauf des Clips steht „Zur QC-Neuprüfung freigegeben“ mit dem bisherigen Grund.
+- Auch bei angehaltener Job-Schleife oder offenem Test-Lauf möglich; die Jobs entstehen, sobald die Job-Schleife läuft.
+
+Empfohlener Ablauf nach einer geänderten QC-Metrik: Metrik anpassen → `test-qc` (Testbericht prüfen) → `retry-qc`.
 
 ## Ingest (vorhandene Master und Proxys)
 
@@ -412,4 +425,5 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 - `reports/test_<stempel>.txt` – Testbericht eines Test-Laufs
 - `state/journal_<stufe>.jsonl` – Job-Protokoll seit dem letzten Detailbericht; danach in `state/journal/details_<stufe>_<stempel>.jsonl`
 - `reports/errors/test-qc_<stempel>_errors.txt` – von `test-qc` übersprungene Clips
+- `reports/errors/retry-qc_<stempel>_errors.txt` – von `retry-qc` übersprungene Clips
 - `test/test.json` – Stand des Test-Modus (offener Test-Lauf, IDs aller Test-Jobs); nicht löschen, solange Test-Jobs auf dem SMB liegen

@@ -20,7 +20,7 @@ Dieses Protokoll beschreibt alles, was zwischen Marathon und den Workern ausgeta
 
 | Komponente | Version | Dateien |
 |---|---|---|
-| Marathon | 1.14.0 | `marathon.py`, `core/` |
+| Marathon | 1.15.0 | `marathon.py`, `core/` |
 | Marathon-Adapter (gemeinsamer Teil aller Worker-Adapter) | 1.1.1 | `marathon/marathon_adapter.py` |
 | QC Marathon (QC-Adapter) | 2.1.1 | `marathon/qc_marathon.py`, `marathon/configs/` |
 | QC Worker | 2.1.0 | `qc_worker.py` |
@@ -244,6 +244,7 @@ Vorlage:
 
 | Datum | Antrag | Änderung |
 |---|---|---|
+| 2026-10-09 | – | Marathon 1.15.0: Befehl `retry-qc` gibt Clips mit „QC nicht bestanden“ zur QC-Neuprüfung frei; Schnittstelle unverändert |
 | 2026-10-09 | CR-003 | Marathon 1.14.0: liest den QC-Prüfbericht (3.12) für Detail- und Testbericht; QC-Ausgang mit nur dem Prüfbericht wird als `<work_dir>/qc/archiv/<job_id>.aqc.json` archiviert (3.6); Worker unverändert |
 | 2026-10-09 | – | QC Marathon 2.1.1: Prüfbericht in Konsole und Log ab `<work_dir>` gekürzt; Schnittstelle unverändert |
 | 2026-10-09 | – | Worker: detaillierte Konsolenausgaben; Marathon-Adapter 1.1.1 mit Hilfe `status(message)`, QC Marathon 2.1.0, QC Worker 2.1.0, AQC 0.3.1; Schnittstelle zu Marathon unverändert |

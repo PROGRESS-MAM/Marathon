@@ -21,6 +21,7 @@ from .cleanup import begin_delete, delete_folders
 from .report import report
 from .details import write_details
 from .ingest import ingest
+from .retry import begin_retry_qc, retry_qc
 from .testrun import cancel_test, start_qc_test, start_test, test_cycle, test_job_ids, test_status
 
 
@@ -113,7 +114,7 @@ def main(argv: list[str] | None = None) -> None:
         threading.Thread(target=_console, args=(commands,), daemon=True).start()
     log("Marathon wartet auf Befehle ('help' zeigt alle).")
     mode, auto = None, False  # mode: None, "run" (job loop) or "test" (test mode); never both at once.
-    pending_delete = None
+    pending_delete = pending_retry = None
     next_cycle = next_retry = last_problem = last_skip = None
     while True:
         problem = load_config()
@@ -159,6 +160,17 @@ def main(argv: list[str] | None = None) -> None:
             log("Bereinigung abgebrochen. Nichts gelöscht; Job-Schleife bleibt aus.")
             if command not in ("quit", "__eof__"):
                 continue
+        if pending_retry is not None:
+            clip_ids, pending_retry = pending_retry, None
+            if command == "freigeben" and not problem:
+                try:
+                    retry_qc(clip_ids)
+                except Exception as exc:
+                    log(f"QC-Freigabe fehlgeschlagen: {exc}")
+                continue
+            log("QC-Freigabe abgebrochen. Nichts geändert.")
+            if command not in ("quit", "__eof__"):
+                continue
         if command == "__eof__":
             continue
         if command == "quit":
@@ -199,6 +211,8 @@ def main(argv: list[str] | None = None) -> None:
                 _create_folders()
             elif command == "delete-folder":
                 pending_delete = begin_delete()
+            elif command == "retry-qc":
+                pending_retry = begin_retry_qc()
             elif command == "update-ffe":
                 update_ffe()
             elif command in ("ingest-master", "ingest-proxy"):
