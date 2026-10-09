@@ -15,9 +15,11 @@ log_dir = project_dir / "log"
 state_dir = project_dir / "state"
 reports_dir = project_dir / "reports"
 error_dir = reports_dir / "errors"
+test_dir = project_dir / "test"
 config_path = res_dir / "config.ini"
 state_path = state_dir / "marathon.json"
 lock_path = state_dir / "marathon.lock"
+test_state_path = test_dir / "test.json"
 main_log = log_dir / "marathon.log"
 config_schema = {  # section: {key: kind}; all values and their explanations live in res/config.ini
     "paths": {"root_path": "text", "defa_dir": "name", "work_dir": "name", "defa_marker": "text",
@@ -29,6 +31,7 @@ config_schema = {  # section: {key: kind}; all values and their explanations liv
     "veritone": {"base_url": "text", "token_file": "text", "field_clip_id": "text"},
     "ffe": {"list_file": "text", "reference_image": "name", "reference_clip_dir": "name"},
     "ingest": {"master_dir": "text", "proxy_dir": "text", "proxy_prefix": "text"},
+    "test": {"test_file": "text"},
 }
 
 

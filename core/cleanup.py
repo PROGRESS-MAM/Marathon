@@ -18,6 +18,7 @@ from .state import add_event, file_entry, keep_notes, load_state, position, save
 from .naming import find_proxy
 from .ffe import is_reference
 from .audit import missing_masters, report_problem, status, update_activity
+from .testrun import open_test_run
 
 
 # --------- FUNC ---------
@@ -84,6 +85,8 @@ def _busy_workers(entries: dict[str, tuple[str, int, int]]) -> list[str]:
 def _cleanup_plan() -> dict:
     mapping = load_mapping()
     check_root()
+    if run_id := open_test_run():
+        raise RuntimeError(f"Bereinigung blockiert: Test-Lauf {run_id} ist offen; abschließen lassen oder 'test-cancel'.")
     state = load_state()
     roots = _work_roots(mapping, state)
     entries = work_inventory(roots)

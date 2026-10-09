@@ -1,6 +1,6 @@
 # Marathon
 
-Marathon baut aus EditShare-Suche und Veritone einen Clip-Index (JSON), legt Restore-, Transcode- und QC-Jobs nach Prioliste für die Worker aus und erstellt Berichte. Zusätzlich markiert Marathon Clips, die die FFE-Filmtafel benötigen, stellt den Workern die Referenzdateien bereit und übernimmt auf Befehl vorhandene Master (`ingest-master`) und vorhandene Proxys (`ingest-proxy`).
+Marathon baut aus EditShare-Suche und Veritone einen Clip-Index (JSON), legt Restore-, Transcode- und QC-Jobs nach Prioliste für die Worker aus und erstellt Berichte. Zusätzlich markiert Marathon Clips, die die FFE-Filmtafel benötigen, stellt den Workern die Referenzdateien bereit und übernimmt auf Befehl vorhandene Master (`ingest-master`) und vorhandene Proxys (`ingest-proxy`). Im Test-Modus (`test`) laufen Test-Jobs durch die Worker, ohne den Produktionsstand zu ändern.
 
 ## Installation
 
@@ -22,21 +22,23 @@ res/
   cred.env                             FLOW_HOST, FLOW_USER, FLOW_PASSWORD (Suche, EditShare-Feld) und vt_api_token=<Token>
   collections.json                     Kollektionsmapping
   priority.txt                         Prioliste (wird beim ersten Lauf als Vorlage angelegt)
+  test_jobs.json                       Testliste für den Test-Modus (nur für `test` nötig)
   FFE Filmerbe/
     FFE-Filmerbe-DEFA-Titel_ids.json   FFE-Liste
     FFE-Filmerbe-DEFA-Titel_Tafel.png  Referenz-Screenshot der FFE-Filmtafel
     *.mov                              alle FFE-Filmtafel-Clips, z. B. 2K_2_35.mov
 ~~~
 
-`marathon.py` und `core/` gehören immer zusammen: Bei einem Update beide vollständig ersetzen; `res/`, `log/`, `state/` und `reports/` bleiben unverändert.
+`marathon.py` und `core/` gehören immer zusammen: Bei einem Update beide vollständig ersetzen; `res/`, `log/`, `state/`, `reports/` und `test/` bleiben unverändert.
 
-`log/`, `state/`, `reports/` und `reports/errors/` legt Marathon selbst an. Der Index liegt in `state/marathon.json` (JSON-Version 7).
+`log/`, `state/`, `reports/`, `reports/errors/` und `test/` legt Marathon selbst an. Der Index liegt in `state/marathon.json` (JSON-Version 7), der Stand des Test-Modus in `test/test.json`.
 
 ## Start
 
 ~~~bash
 python marathon.py                 # Konsole, Befehle mit Enter eingeben
 python marathon.py run auto-report # Befehle direkt nach dem Start ausführen
+python marathon.py test            # Test-Modus direkt nach dem Start
 ~~~
 
 Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
@@ -46,7 +48,9 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 | Befehl | Wirkung |
 | --- | --- |
 | `run` | Ordner und Referenzdateien anlegen, Index aufbauen falls keine JSON existiert, dann Job-Schleife starten |
-| `stop` | Job-Schleife anhalten |
+| `stop` | Job-Schleife bzw. Test-Modus anhalten |
+| `test` | Test-Modus: Test-Lauf aus der Testliste starten oder offenen Test-Lauf fortsetzen; hält die Job-Schleife an (siehe Test-Modus) |
+| `test-cancel` | Offenen Test-Lauf beenden: nicht übernommene Test-Jobs zurückziehen, Testbericht schreiben |
 | `auto-report` | Täglichen Auto-Bericht einschalten (ab `auto_report_time`) |
 | `auto-report-off` | Täglichen Auto-Bericht ausschalten |
 | `report` | Manuellen Bericht sofort erstellen |
@@ -55,8 +59,8 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 | `update-ffe` | Nur FFE-Liste mit der bestehenden JSON abgleichen, ohne Suche |
 | `ingest-master` | Masterdateien aus `master_dir` über die DEFA-ID abgleichen und eintragen (weiter an Transcode); nur auf Befehl |
 | `ingest-proxy` | Proxys aus `proxy_dir` über die DEFA-ID abgleichen, umbenannt in den QC-Eingang verschieben (weiter an QC); nur auf Befehl |
-| `delete-folder` | SMB-Arbeitsordner bereinigen; Index bleibt, Prozesszustand wird neu aufgebaut. Bei Clip-/Mediendateien Bestätigung mit `loeschen` |
-| `status` | Anzeigen, was eingeschaltet ist |
+| `delete-folder` | SMB-Arbeitsordner bereinigen; Index bleibt, Prozesszustand wird neu aufgebaut. Bei Clip-/Mediendateien Bestätigung mit `loeschen`; gesperrt bei offenem Test-Lauf |
+| `status` | Anzeigen, was eingeschaltet ist, und Stand des Test-Laufs |
 | `help` | Befehlsübersicht |
 | `quit` | Marathon beenden |
 
@@ -247,9 +251,67 @@ Nicht eingetragene Dateien bleiben unverändert liegen.
 
 Fehler und Hinweise stehen in `reports/errors/ingest-master_<stempel>_errors.txt` bzw. `reports/errors/ingest-proxy_<stempel>_errors.txt`, die Zahlen im Protokoll.
 
+## Test-Modus
+
+Test-Jobs laufen wie Produktions-Jobs durch die Worker (Restore, Transcode, QC); Marathon sammelt die Reports ein, ändert aber weder `state/marathon.json` noch Dateien der Produktion.
+
+~~~bash
+Marathon> test           # Test-Lauf starten oder offenen Test-Lauf fortsetzen
+Marathon> status         # Fortschritt des Test-Laufs
+Marathon> test-cancel    # Test-Lauf vorzeitig beenden
+python marathon.py test  # oder direkt beim Start
+~~~
+
+**Testliste** (`res/test_jobs.json`, Name über `[test] test_file`):
+
+~~~json
+{
+  "schema_version": 1,
+  "tests": [
+    { "name": "Proxy mit FFE-Tafel", "stage": "QC", "clip_id": "98765" },
+    { "name": "Kalibrierclip Stille", "stage": "QC", "clip_id": "98765",
+      "fields": { "input": "DEFA/AQC/Kalibrierung/stille.mp4", "ffe_tafel": false } },
+    { "stage": "Transcode", "clip_id": "98766" },
+    { "stage": "Restore", "clip_id": "98767" }
+  ]
+}
+~~~
+
+| Schlüssel | Pflicht | Bedeutung |
+| --- | --- | --- |
+| `stage` | ja | `Restore`, `Transcode` oder `QC` |
+| `clip_id` | ja | Clip aus `state/marathon.json`; liefert alle Job-Felder |
+| `name` | nein | Bezeichnung im Testbericht (Standard `<Stufe> <clip_id>`) |
+| `fields` | nein | Job-Felder, die ersetzt oder ergänzt werden; nicht erlaubt: `schema_version`, `job_id`, `stage`, `clip_id`, `created_at`, `report_folder`, `output_folder`, `test` |
+
+- Job-Felder ohne Angabe in `fields` kommen wie im Produktionsbetrieb aus der JSON: QC `input` = aktueller Proxy des Clips (QC-Eingang oder Zielordner), Transcode `inputs` = Master des Clips und `proxy_name`, Restore `files` und `hashes`. Hat der Clip keinen Proxy bzw. Master oder keine Veritone-ID, müssen `fields` die Werte angeben.
+- Werte in `fields` prüft Marathon nicht; so lassen sich auch ungültige Jobs testen.
+- Ist ein Eintrag ungültig, startet kein Test-Lauf; das Protokoll nennt alle fehlerhaften Einträge.
+
+**Ablauf:**
+
+- `test` hält die Job-Schleife an und legt aus der Testliste einen Test-Lauf an. Ist noch ein Test-Lauf offen, wird er mit seiner ursprünglichen Testliste fortgesetzt.
+- Jeder Test-Zyklus (`cycle_seconds`) legt Test-Jobs in der Reihenfolge der Testliste nach `<work_dir>/<stufe>/offen`, höchstens so viele offene Test-Jobs je Stufe, wie `[limits]` erlaubt, verfolgt die Übernahme und sammelt die Reports ein.
+- Job-Datei und Report werden wie im Produktionsbetrieb nach `<work_dir>/<stufe>/archiv/` verschoben. Das Ergebnis jedes Test-Jobs bleibt in `<work_dir>/test/<stufe>/ausgang/<job_id>` liegen (z. B. die `.aqc.json` des QC).
+- Ohne Wirkung auf die Produktion: Die JSON wird nicht geschrieben; Proxys, Master und Eingänge werden weder verschoben noch gelöscht oder ausgeliefert; kein EditShare-Feld; kein neuer Versuch bei `failed`. Eine verschwundene Test-Job-Datei wird nach 30 Minuten neu ausgelegt.
+- Arbeitsordner und FFE-Referenzdateien stellt Marathon wie in jedem Job-Zyklus bereit.
+- Sind alle Tests fertig, schreibt Marathon den Testbericht `reports/test_<stempel>.txt` und beendet den Test-Modus.
+- `test-cancel` sammelt vorliegende Reports ein, zieht nicht übernommene Test-Jobs zurück und schreibt den Testbericht. Reports bereits laufender Test-Jobs werden im nächsten Test-Lauf archiviert, aber nicht gewertet.
+- `run` und `stop` halten den Test-Modus an; der Test-Lauf bleibt offen. Die Job-Schleife lässt Test-Jobs und ihre Reports liegen, der Test-Modus ebenso Produktions-Jobs und deren Reports.
+- Liegen beim Start noch Produktions-Jobs in `offen` oder `laufend`, meldet Marathon das: Worker nehmen ältere Jobs zuerst.
+- `delete-folder` ist gesperrt, solange ein Test-Lauf offen ist; danach löscht es auch `<work_dir>/test/` mit dem Arbeitsordner.
+
+**Testbericht:** Kopfzeile mit Testliste und Zählung, dann je Test `Nr | Test | Stufe | clip_id | Status | Preset | Worker | Job | Ausgang | Ergebnis`, am Ende Hinweise.
+
+| Status | Bedeutung |
+| --- | --- |
+| `ok`, `failed`, `rejected` | vom Worker gemeldet |
+| `nicht ausgelegt` | Clip liefert die Job-Felder beim Auslegen nicht mehr |
+| `abgebrochen` | durch `test-cancel` beendet |
+
 ## Konfiguration (`res/config.ini`)
 
-Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pausiert Marathon, bis sie korrigiert ist. Änderungen in `[paths]` sowie an `reference_image` und `reference_clip_dir` pausieren Marathon bis zum Neustart oder zur Rücknahme; Änderungen in `[ingest]` gelten ohne Neustart.
+Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pausiert Marathon, bis sie korrigiert ist. Änderungen in `[paths]` sowie an `reference_image` und `reference_clip_dir` pausieren Marathon bis zum Neustart oder zur Rücknahme; Änderungen in `[ingest]` und `[test]` gelten ohne Neustart.
 
 | Abschnitt | Eintrag | Bedeutung |
 | --- | --- | --- |
@@ -277,6 +339,7 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 | ingest | master_dir | Ordner mit Masterdateien `<DEFA-ID>__<Titel>.<Endung>` (vollständiger Pfad, gleiches Netzlaufwerk wie `root_path`); `ingest-master` liest ihn, neue Master aus Transcode legt Marathon hier ab (ohne Überschreiben) |
 | ingest | proxy_dir | Ordner mit vorhandenen Proxys `<proxy_prefix>__<DEFA-ID>__<Titel>.mp4` (vollständiger Pfad, gleiches Netzlaufwerk wie `root_path`); nur `ingest-proxy` liest ihn |
 | ingest | proxy_prefix | Namensanfang der Proxys in `proxy_dir` (ohne das folgende `__`), z. B. `(c)PROGRESS__10Mbit` |
+| test | test_file | Testliste im res-Ordner für `test` (z. B. `test_jobs.json`); wird bei jedem neuen Test-Lauf gelesen, muss erst dann vorhanden sein |
 
 ## Ausgaben
 
@@ -287,3 +350,5 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 - `reports/errors/<index|ffe>_<stempel>_ffe_uneindeutig.txt` – uneindeutige FFE-Treffer
 - `reports/errors/ingest-master_<stempel>_errors.txt` – nicht eingetragene Masterdateien und Hinweise von `ingest-master`
 - `reports/errors/ingest-proxy_<stempel>_errors.txt` – nicht übernommene Proxys und Hinweise von `ingest-proxy`
+- `reports/test_<stempel>.txt` – Testbericht eines Test-Laufs
+- `test/test.json` – Stand des Test-Modus (offener Test-Lauf, IDs aller Test-Jobs); nicht löschen, solange Test-Jobs auf dem SMB liegen

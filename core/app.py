@@ -20,6 +20,7 @@ from .jobs import process
 from .cleanup import begin_delete, delete_folders
 from .report import report
 from .ingest import ingest
+from .testrun import cancel_test, start_test, test_cycle, test_job_ids, test_status
 
 
 # --------- FUNC ---------
@@ -32,7 +33,7 @@ def _cycle() -> str | None:
     state, ctx = load_state(), context()
     if state.get("cleanup", {}).get("pending"):
         return "Bereinigung noch unvollständig; zuerst delete-folder erneut ausführen."
-    process(state, mapping, priority(mapping, state, ctx), ctx, writing=True)
+    process(state, mapping, priority(mapping, state, ctx), ctx, writing=True, test_ids=test_job_ids())
     keep_notes(state, ctx["issues"])
     state["updated_at"] = now()
     save_state(state)
@@ -72,10 +73,11 @@ def _help_text() -> str:
     return "Befehle:\n" + "\n".join(f"  {name:<16} {text}" for name, text in commands_help.items())
 
 
-def _status_text(running: bool, auto: bool) -> str:
+def _status_text(mode: str | None, auto: bool) -> str:
     when = cfg.get("auto_report_time")
     auto_text = (f"an (täglich ab {when:%H:%M})" if when else "an") if auto else "aus"
-    return f"Status: Job-Schleife {'läuft' if running else 'aus'}; Auto-Bericht {auto_text}."
+    return (f"Status: Job-Schleife {'läuft' if mode == 'run' else 'aus'}; Test-Modus {'läuft' if mode == 'test' else 'aus'} "
+            f"({test_status()}); Auto-Bericht {auto_text}.")
 
 
 def _console(commands: queue.Queue[str]) -> None:
@@ -109,7 +111,7 @@ def main(argv: list[str] | None = None) -> None:
     if "quit" not in startup:
         threading.Thread(target=_console, args=(commands,), daemon=True).start()
     log("Marathon wartet auf Befehle ('help' zeigt alle).")
-    running = auto = False
+    mode, auto = None, False  # mode: None, "run" (job loop) or "test" (test mode); never both at once.
     pending_delete = None
     next_cycle = next_retry = last_problem = last_skip = None
     while True:
@@ -128,14 +130,20 @@ def main(argv: list[str] | None = None) -> None:
                 except Exception as exc:
                     next_retry = now + timedelta(minutes=cfg["retry_minutes"])
                     log(f"Auto-Bericht fehlgeschlagen: {exc}; neuer Versuch in {cfg['retry_minutes']} min.")
-            if running and not problem and now >= next_cycle:
+            if mode and not problem and now >= next_cycle:
                 try:
-                    skipped = _cycle()
-                    if skipped and skipped != last_skip:
-                        log(skipped)
-                    last_skip = skipped
+                    if mode == "test":
+                        if test_cycle():
+                            mode = None
+                            log(_status_text(mode, auto))
+                    else:
+                        skipped = _cycle()
+                        if skipped and skipped != last_skip:
+                            log(skipped)
+                        last_skip = skipped
                 except Exception as exc:
-                    log(f"Job-Zyklus fehlgeschlagen: {exc}; Job-Schleife bleibt aktiv.")
+                    log(f"Test-Zyklus fehlgeschlagen: {exc}; Test-Modus bleibt aktiv." if mode == "test" else
+                        f"Job-Zyklus fehlgeschlagen: {exc}; Job-Schleife bleibt aktiv.")
                 next_cycle = now + timedelta(seconds=cfg["cycle_seconds"])
             continue
         if pending_delete is not None:
@@ -158,19 +166,29 @@ def main(argv: list[str] | None = None) -> None:
             log(("" if command in ("", "help") else f"Unbekannter Befehl {command!r}.\n") + _help_text())
             continue
         if command in ("stop", "auto-report-off", "status"):
-            running, auto = running and command != "stop", auto and command != "auto-report-off"
-            log(_status_text(running, auto))
+            mode, auto = None if command == "stop" else mode, auto and command != "auto-report-off"
+            log(_status_text(mode, auto))
             continue
         if command == "delete-folder":
-            running = False
-            log("Job-Schleife für Bereinigung angehalten.")
+            mode = None
+            log("Job-Schleife und Test-Modus für Bereinigung angehalten.")
         if problem:
             log(f"{command!r} während der Pause nicht möglich: {problem}")
             continue
         try:
             if command == "run":
                 _start_run()
-                running, next_cycle, last_skip = True, now, None
+                if mode == "test":
+                    log("Test-Modus angehalten; der Test-Lauf bleibt offen ('test' setzt ihn fort).")
+                mode, next_cycle, last_skip = "run", now, None
+            elif command == "test":
+                start_test()
+                if mode == "run":
+                    log("Job-Schleife angehalten; Produktions-Jobs und JSON bleiben unverändert.")
+                mode, next_cycle = "test", now
+            elif command == "test-cancel":
+                cancel_test()
+                mode = None if mode == "test" else mode
             elif command == "auto-report":
                 auto, next_retry = True, None
             elif command == "report":
@@ -185,7 +203,7 @@ def main(argv: list[str] | None = None) -> None:
                 ingest(command.removeprefix("ingest-"))
             else:
                 update_index()
-            if command in ("run", "auto-report"):
-                log(_status_text(running, auto))
+            if command in ("run", "test", "test-cancel", "auto-report"):
+                log(_status_text(mode, auto))
         except Exception as exc:
             log(f"{command!r} fehlgeschlagen: {exc}")

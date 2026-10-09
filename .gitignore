@@ -2,6 +2,7 @@
 /reports
 /res
 /state
+/test
 .venv
 /jobs
 /pipelines

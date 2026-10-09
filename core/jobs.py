@@ -16,6 +16,7 @@ Worker rules (paths relative to the share root, "/" as separator):
   files in <work_dir>/worker/; workers only read them and never write into that folder except their heartbeat.
 - Marathon moves results on (a new master into master_dir, never overwriting), archives job, report and output
   leftovers, deletes failed partial results and withdrawn jobs.
+- Test jobs (core.testrun) share the pools; the job loop skips their job files and reports (test_ids).
 """
 # --------- IMPORTS ---------
 import json
@@ -39,8 +40,8 @@ from .audit import check_files, report_problem, status, update_activity
 
 
 # --------- FUNC ---------
-def _archive_job(job: dict) -> str | None:
-    """Move the job file to archiv; returns the worker folder it was found in."""
+def archive_job(job: dict) -> str | None:
+    """Move the job file (job["folder"], job["file"]) to archiv; returns the worker folder it was found in."""
     folder, name = job["folder"], job["file"]
     for worker in subfolders(f"{folder}/laufend"):
         if move(f"{folder}/laufend/{worker}/{name}", f"{folder}/archiv"):
@@ -176,9 +177,9 @@ def _retire(folder: str, job_id: str, ctx: dict) -> None:
         move(output, output_archive(output), f"{Path(found[1]).stem}.{outbox}")
 
 
-def _collect_reports(folder: str, jobs: dict[str, dict], ctx: dict) -> None:
+def _collect_reports(folder: str, jobs: dict[str, dict], ctx: dict, test_ids: frozenset[str]) -> None:
     for name, _ in sorted(scan(f"{folder}/fertig").values()):
-        if not name.casefold().endswith(".json"):
+        if not name.casefold().endswith(".json") or Path(name).stem.casefold() in test_ids:
             continue
         relative, archived = f"{folder}/fertig/{name}", f"{Path(name).stem}.report.json"
         try:
@@ -197,7 +198,7 @@ def _collect_reports(folder: str, jobs: dict[str, dict], ctx: dict) -> None:
             _retire(folder, report["job_id"], ctx)
             continue
         job = jobs.pop(report["job_id"])["job"]
-        _apply_report(clip, job, report, _archive_job(job) or job.get("worker"), ctx)
+        _apply_report(clip, job, report, archive_job(job) or job.get("worker"), ctx)
         move(relative, f"{folder}/archiv", archived)
 
 
@@ -260,22 +261,28 @@ def withdraw(clip: dict) -> bool:
     return True
 
 
-def _job_payload(clip: dict, job_id: str, folder: str) -> dict:
-    stage = clip["stage"]
+def _stage_fields(clip: dict, stage: str) -> dict:
+    """Stage fields of a job; values are built lazily so that test jobs can replace fields the clip cannot provide."""
+    master, proxy = clip["files"]["master"], clip["files"]["proxy"]
+    if stage == "restore":
+        return {"hashes": lambda: clip["filehashes"], "files": lambda: clip["master_files"]}
+    if stage == "transcode":
+        return {ffe_flag: lambda: clip[ffe_flag], "ffe_reference_clips": reference_clips, "proxy_name": lambda: proxy_name(clip),
+                "inputs": lambda: [join(master["folder"], name) for name in master["names"]]}
+    return {ffe_flag: lambda: clip[ffe_flag], "ffe_reference_image": reference_image,
+            "input": lambda: f"{proxy['folder']}/{proxy['name']}"}
+
+
+def job_payload(clip: dict, stage: str, job_id: str, report_folder: str, output_folder: str,
+                overrides: dict | None = None) -> dict:
+    """Job file content (schema_version 5); overrides replace or add fields (test jobs only)."""
+    overrides = overrides or {}
     payload = {"schema_version": 5, "job_id": job_id, "stage": stage_labels[stage], "clip_id": clip["clip_id"],
                "collection": clip["collection"], "identifier": clip["identifier"], "title": clip["title"],
                "clip_name": clip["clip_name_with_extension"], "created_at": now(),
-               "report_folder": f"{folder}/fertig",
-               "output_folder": f"{stage_folder(clip['collection'], stage)}/{outbox}/{job_id}"}
-    if stage == "restore":
-        payload.update(hashes=clip["filehashes"], files=clip["master_files"])
-    elif stage == "transcode":
-        master = clip["files"]["master"]
-        payload.update({ffe_flag: clip[ffe_flag], "ffe_reference_clips": reference_clips(), "proxy_name": proxy_name(clip),
-                        "inputs": [join(master["folder"], name) for name in master["names"]]})
-    else:
-        payload.update({ffe_flag: clip[ffe_flag], "ffe_reference_image": reference_image(),
-                        "input": f"{clip['files']['proxy']['folder']}/{clip['files']['proxy']['name']}"})
+               "report_folder": report_folder, "output_folder": output_folder}
+    payload.update({key: value() for key, value in _stage_fields(clip, stage).items() if key not in overrides})
+    payload.update(overrides)
     return payload
 
 
@@ -284,7 +291,7 @@ def _create_job(clip: dict) -> None:
     folder = job_folder(stage)
     clip["job_count"] += 1
     job_id = f"{stamp()}__{clip['clip_id']}__{stage_labels[stage].casefold()}{clip['job_count']}"
-    payload = _job_payload(clip, job_id, folder)
+    payload = job_payload(clip, stage, job_id, f"{folder}/fertig", f"{stage_folder(clip['collection'], stage)}/{outbox}/{job_id}")
     share_path(payload["output_folder"]).mkdir(parents=True, exist_ok=True)
     write_text_atomic(share_path(f"{folder}/offen/{job_id}.json"), json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     clip["job"] = {"id": job_id, "stage": stage, "folder": folder, "file": f"{job_id}.json",
@@ -310,8 +317,9 @@ def _schedule(state: dict, prio: dict[str, list[str]], ctx: dict) -> None:
             _create_job(clip)
 
 
-def process(state: dict, mapping: list[dict], prio: dict[str, list[str]], ctx: dict, writing: bool) -> None:
-    """Evaluate all clips; writing=False only reads the share (reports)."""
+def process(state: dict, mapping: list[dict], prio: dict[str, list[str]], ctx: dict, writing: bool,
+            test_ids: frozenset[str] = frozenset()) -> None:
+    """Evaluate all clips; writing=False only reads the share (reports). Test jobs (casefolded test_ids) stay untouched."""
     clips = state["clips"]
     read_workers(state)
     if writing:
@@ -320,13 +328,13 @@ def process(state: dict, mapping: list[dict], prio: dict[str, list[str]], ctx: d
         jobs = {clip["job"]["id"]: clip for clip in clips.values() if clip["job"]}
         folders = [job_folder(stage) for stage in stages]
         for folder in folders:
-            _collect_reports(folder, jobs, ctx)
+            _collect_reports(folder, jobs, ctx, test_ids)
         write_fields(state)
         ctx["listings"].clear()  # Reports moved files around.
         for clip in clips.values():
             if clip["job"]:
                 _locate_job(clip, ctx)
-        known = {clip["job"]["file"].casefold() for clip in clips.values() if clip["job"]}
+        known = {clip["job"]["file"].casefold() for clip in clips.values() if clip["job"]} | {f"{job_id}.json" for job_id in test_ids}
         for folder in folders:
             _sweep_unknown_jobs(folder, known, ctx)
     for clip in clips.values():

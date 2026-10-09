@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from .constants import ffe_flag, stage_labels, stages
-from .config import state_dir, state_path
+from .config import state_path
 from .util import now, stamp
 
 
@@ -91,18 +91,18 @@ def load_state() -> dict:
     return state
 
 
-def save_state(state: dict) -> None:
-    """Write the JSON atomically."""
+def save_state(state: dict, path: Path = state_path) -> None:
+    """Write the JSON (or another state file such as the test state) atomically."""
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=state_dir,
-                                         prefix=".marathon-", suffix=".tmp", delete=False) as handle:
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent,
+                                         prefix=f".{path.stem}-", suffix=".tmp", delete=False) as handle:
             temporary = Path(handle.name)
             json.dump(state, handle, ensure_ascii=False, indent=2)
             handle.write("\n")
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(temporary, state_path)
+        os.replace(temporary, path)
     finally:
         if temporary is not None:
             temporary.unlink(missing_ok=True)

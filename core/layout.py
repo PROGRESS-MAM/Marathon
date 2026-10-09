@@ -7,7 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from .constants import inbox, invalid_path_chars, reserved_names, summary_name
-from .config import cfg, error_dir, lock_path, log_dir, reports_dir, res_dir, state_dir, state_path
+from .config import cfg, error_dir, lock_path, log_dir, reports_dir, res_dir, state_dir, state_path, test_dir
 
 
 # --------- INIT ---------
@@ -22,7 +22,7 @@ def res(key: str) -> Path:
 
 def prepare() -> None:
     """Create the local project folders; raises if state holds another JSON file."""
-    for folder in (res_dir, log_dir, state_dir, reports_dir, error_dir):
+    for folder in (res_dir, log_dir, state_dir, reports_dir, error_dir, test_dir):
         folder.mkdir(parents=True, exist_ok=True)
     if any(path != state_path for path in state_dir.glob("*.json")):
         raise RuntimeError("Weitere JSON-Datei in state gefunden; bitte Quelle des Zustands klären.")

@@ -67,7 +67,9 @@ master_blocked, editshare_failed = "Neuer Master blockiert", "EditShare-Feld nic
 status_codes = {delivery_blocked: "auslieferung_blockiert", master_blocked: "master_blockiert", assignment_unclear: "zuordnung_ungeklaert", lost_proxy: "verloren", lost_master: "verloren", qc_rejected: "qc_abgelehnt", job_failed: "fehlgeschlagen"}
 commands_help = {
     "run": "Ordner und JSON anlegen, falls sie fehlen; dann Job-Schleife starten",
-    "stop": "Job-Schleife anhalten",
+    "stop": "Job-Schleife bzw. Test-Modus anhalten",
+    "test": "Test-Modus: Test-Jobs aus der Testliste auslegen und ihre Reports einsammeln; JSON und Dateien bleiben unverändert",
+    "test-cancel": "Offenen Test-Lauf beenden: nicht übernommene Test-Jobs zurückziehen, Testbericht schreiben",
     "auto-report": "Täglichen Auto-Bericht einschalten (ab auto_report_time)",
     "auto-report-off": "Täglichen Auto-Bericht ausschalten",
     "report": "Manuellen Bericht sofort erstellen",
@@ -99,4 +101,7 @@ ffe_share_keys = ("reference_image", "reference_clip_dir")  # Names on the share
 ffe_clip_suffix = ".mov"  # Only these files in reference_clip_dir count as FFE title clips.
 ffe_mtime_tolerance = 2  # Seconds; SMB servers may store modification times with reduced precision.
 ingest_source, ingest_separator = "Ingest", "__"  # files.master source of ingested masters; master name <DEFA-ID>__<title>
+test_box = "test"  # Folder below work_dir with the outputs of test jobs: <work_dir>/test/<stage>/ausgang/<job_id>
+test_entry_keys = frozenset({"name", "stage", "clip_id", "fields"})  # Keys of a test list entry.
+test_protected = frozenset({"schema_version", "job_id", "stage", "clip_id", "created_at", "report_folder", "output_folder", "test"})
 ingest_sections = {"ingest_error": "Nicht eingetragen (Fehler)", "ingest_info": "Hinweise (kein Fehler, nicht eingetragen)"}
