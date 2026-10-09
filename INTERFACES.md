@@ -21,10 +21,10 @@ Dieses Protokoll beschreibt alles, was zwischen Marathon und den Workern ausgeta
 | Komponente | Version | Dateien |
 |---|---|---|
 | Marathon | 1.12.0 | `marathon.py`, `core/` |
-| Marathon-Adapter (gemeinsamer Teil aller Worker-Adapter) | 1.1.0 | `marathon/marathon_adapter.py` |
-| QC Marathon (QC-Adapter) | 2.0.0 | `marathon/qc_marathon.py`, `marathon/configs/` |
-| QC Worker | 2.0.0 | `qc_worker.py` |
-| AQC (Prüftools) | 0.3.0 | `aqc/`, `aqc/tools/` |
+| Marathon-Adapter (gemeinsamer Teil aller Worker-Adapter) | 1.1.1 | `marathon/marathon_adapter.py` |
+| QC Marathon (QC-Adapter) | 2.1.1 | `marathon/qc_marathon.py`, `marathon/configs/` |
+| QC Worker | 2.1.0 | `qc_worker.py` |
+| AQC (Prüftools) | 0.3.1 | `aqc/`, `aqc/tools/` |
 | Restore-Worker | nicht dokumentiert | – |
 | Transcode-Worker | nicht dokumentiert | – |
 
@@ -161,7 +161,7 @@ Danach archiviert Marathon Job-Datei und Report (`<job_id>.report.json`) in `<wo
 - Schnittstelle für Stufen-Adapter:
   - `Settings(root_path, work_dir, stage, poll_seconds, heartbeat_seconds, log_path, versions)`
   - `run(settings, run_job)`; `run_job(job, output_folder, log_path)` liefert `JobReport(status, result, preset)`
-  - Hilfen: `share_path(relative)`, `log(message)`, `worker_name()`
+  - Hilfen: `share_path(relative)`, `log(message)` (Konsole mit Uhrzeit und Log), `status(message)` (Laufzeile nur in der Konsole, die nächste Ausgabe ersetzt sie), `worker_name()`
 - Der Adapter prüft vor `run_job`: `schema_version`, `job_id` = Dateiname, `stage`, `output_folder` und `report_folder` vorhanden. Sonst Report `failed` „Job ungültig“.
 - Ausnahmen in `run_job` werden zum Report `failed`.
 - Ein zweiter Start mit demselben Worker-Namen bricht ab, solange dessen Heartbeat aktualisiert wird. Beim Start werden eigene Jobs in `laufend/` ohne Report als `failed` gemeldet.
@@ -169,7 +169,7 @@ Danach archiviert Marathon Job-Datei und Report (`<job_id>.report.json`) in `<wo
 
 ### 3.10 Stufen-Worker
 
-**QC (QC Marathon 2.0.0)**
+**QC (QC Marathon 2.1.1)**
 
 - Prüfplan `proxy_standard`: `stream_specs(video_1080p)`, `stream_specs(audio_aac_stereo)`, `digital_silence(keine_stille)`.
 - Bei `ffe_tafel: true` zusätzlich `ffe_tafel`: `reference_frame(FFE_tafel_start_ok)` und `reference_frame(FFE_tafel_ende_not_ok)` mit `must_fail`; Referenzbild aus `ffe_reference_image`.
@@ -220,6 +220,8 @@ Vorlage:
 
 | Datum | Antrag | Änderung |
 |---|---|---|
+| 2026-10-09 | – | QC Marathon 2.1.1: Prüfbericht in Konsole und Log ab `<work_dir>` gekürzt; Schnittstelle unverändert |
+| 2026-10-09 | – | Worker: detaillierte Konsolenausgaben; Marathon-Adapter 1.1.1 mit Hilfe `status(message)`, QC Marathon 2.1.0, QC Worker 2.1.0, AQC 0.3.1; Schnittstelle zu Marathon unverändert |
 | 2026-10-09 | – | Marathon 1.12.0: Befehl `test-qc` erzeugt Test-Jobs nach 3.11 aus der JSON; Schnittstelle unverändert |
 | 2026-10-09 | CR-002 | Marathon 1.11.0: Test-Modus mit Test-Jobs (3.1, 3.3 Feld `test`, 3.11); Worker unverändert |
 | 2026-10-09 | – | QC: Prüftools in `aqc/tools`, Plan-Schlüssel `tool`, Job-`schema_version` 5, FFE-Entscheidung und Referenzbild aus dem Job; Marathon unverändert |
