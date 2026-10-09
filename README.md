@@ -23,6 +23,7 @@ res/
   collections.json                     Kollektionsmapping
   priority.txt                         Prioliste (wird beim ersten Lauf als Vorlage angelegt)
   test_jobs.json                       Testliste für den Test-Modus (nur für `test` nötig)
+  test_jobs_qc.json                    QC-Testliste, von `test-qc` erzeugt
   FFE Filmerbe/
     FFE-Filmerbe-DEFA-Titel_ids.json   FFE-Liste
     FFE-Filmerbe-DEFA-Titel_Tafel.png  Referenz-Screenshot der FFE-Filmtafel
@@ -50,6 +51,7 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 | `run` | Ordner und Referenzdateien anlegen, Index aufbauen falls keine JSON existiert, dann Job-Schleife starten |
 | `stop` | Job-Schleife bzw. Test-Modus anhalten |
 | `test` | Test-Modus: Test-Lauf aus der Testliste starten oder offenen Test-Lauf fortsetzen; hält die Job-Schleife an (siehe Test-Modus) |
+| `test-qc` | QC-Testliste aus der JSON erzeugen (alle Clips mit vorhandenem Proxy im QC-Eingang) und Test-Lauf starten (siehe Test-Modus) |
 | `test-cancel` | Offenen Test-Lauf beenden: nicht übernommene Test-Jobs zurückziehen, Testbericht schreiben |
 | `auto-report` | Täglichen Auto-Bericht einschalten (ab `auto_report_time`) |
 | `auto-report-off` | Täglichen Auto-Bericht ausschalten |
@@ -257,9 +259,11 @@ Test-Jobs laufen wie Produktions-Jobs durch die Worker (Restore, Transcode, QC);
 
 ~~~bash
 Marathon> test           # Test-Lauf starten oder offenen Test-Lauf fortsetzen
+Marathon> test-qc        # QC-Testliste aus der JSON erzeugen und Test-Lauf starten
 Marathon> status         # Fortschritt des Test-Laufs
 Marathon> test-cancel    # Test-Lauf vorzeitig beenden
 python marathon.py test  # oder direkt beim Start
+python marathon.py test-qc
 ~~~
 
 **Testliste** (`res/test_jobs.json`, Name über `[test] test_file`):
@@ -288,9 +292,18 @@ python marathon.py test  # oder direkt beim Start
 - Werte in `fields` prüft Marathon nicht; so lassen sich auch ungültige Jobs testen.
 - Ist ein Eintrag ungültig, startet kein Test-Lauf; das Protokoll nennt alle fehlerhaften Einträge.
 
+**QC-Testliste aus der JSON (`test-qc`):**
+
+- `test-qc` schreibt `res/test_jobs_qc.json` neu und startet damit einen Test-Lauf wie `test`. `res/test_jobs.json` bleibt unberührt.
+- Aufgenommen wird jeder Clip, dessen Proxy laut JSON im QC-Eingang seiner Kollektion liegt (z. B. nach `ingest-proxy`), aktiv oder inaktiv. Die Proxy-Datei muss vorhanden und größer als 0 Byte sein.
+- Übersprungene Clips (Proxy fehlt oder ist leer) zählt das Protokoll; Details in `reports/errors/test-qc_<stempel>_errors.txt`.
+- Reihenfolge: Abschnitt `[QC]` der Prioliste, dann Eingangszeit in der QC-Queue.
+- Je Clip ein Eintrag `{ "name": "<Identifier> <Titel>", "stage": "QC", "clip_id": "…" }` ohne `fields`; `input`, `ffe_tafel` und `ffe_reference_image` kommen beim Auslegen aus der JSON.
+- Ist ein Test-Lauf offen, erzeugt `test-qc` keine Liste und bricht ab (`test` setzt fort, `test-cancel` beendet). Ohne passenden Clip startet kein Test-Lauf.
+
 **Ablauf:**
 
-- `test` hält die Job-Schleife an und legt aus der Testliste einen Test-Lauf an. Ist noch ein Test-Lauf offen, wird er mit seiner ursprünglichen Testliste fortgesetzt.
+- `test` und `test-qc` halten die Job-Schleife an und legen aus der Testliste einen Test-Lauf an. Ist noch ein Test-Lauf offen, wird er mit seiner ursprünglichen Testliste fortgesetzt.
 - Jeder Test-Zyklus (`cycle_seconds`) legt Test-Jobs in der Reihenfolge der Testliste nach `<work_dir>/<stufe>/offen`, höchstens so viele offene Test-Jobs je Stufe, wie `[limits]` erlaubt, verfolgt die Übernahme und sammelt die Reports ein.
 - Job-Datei und Report werden wie im Produktionsbetrieb nach `<work_dir>/<stufe>/archiv/` verschoben. Das Ergebnis jedes Test-Jobs bleibt in `<work_dir>/test/<stufe>/ausgang/<job_id>` liegen (z. B. die `.aqc.json` des QC).
 - Ohne Wirkung auf die Produktion: Die JSON wird nicht geschrieben; Proxys, Master und Eingänge werden weder verschoben noch gelöscht oder ausgeliefert; kein EditShare-Feld; kein neuer Versuch bei `failed`. Eine verschwundene Test-Job-Datei wird nach 30 Minuten neu ausgelegt.
@@ -351,4 +364,5 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 - `reports/errors/ingest-master_<stempel>_errors.txt` – nicht eingetragene Masterdateien und Hinweise von `ingest-master`
 - `reports/errors/ingest-proxy_<stempel>_errors.txt` – nicht übernommene Proxys und Hinweise von `ingest-proxy`
 - `reports/test_<stempel>.txt` – Testbericht eines Test-Laufs
+- `reports/errors/test-qc_<stempel>_errors.txt` – von `test-qc` übersprungene Clips
 - `test/test.json` – Stand des Test-Modus (offener Test-Lauf, IDs aller Test-Jobs); nicht löschen, solange Test-Jobs auf dem SMB liegen

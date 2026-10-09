@@ -12,12 +12,14 @@ from pathlib import Path
 
 from . import app_name, app_version
 from .constants import (
-    limit_keys, missing_job_grace, outbox, stage_labels, stages, test_box, test_entry_keys, test_protected)
-from .config import cfg, reports_dir, state_path, test_state_path
+    limit_keys, missing_job_grace, outbox, stage_labels, stages, test_box, test_entry_keys, test_protected, test_qc_file,
+    test_qc_sections)
+from .config import cfg, error_dir, reports_dir, res_dir, state_path, test_state_path
 from .console import log
-from .util import age, context, file_stamp, now, stamp, write_new
-from .layout import check_root, job_folder, load_mapping, res, share_path
+from .util import age, clip_text, context, file_stamp, format_errors, issue, now, stamp, write_new
+from .layout import check_root, job_folder, load_mapping, qc_inbox, share_path
 from .share import delete_job_file, ensure_folders, listing, move, rmdir, running, scan, write_text_atomic
+from .priority import priority
 from .state import load_state, save_state
 from .ffe import sync_references
 from .audit import report_problem
@@ -114,9 +116,8 @@ def _case(number: int, entry, labels: dict[str, str], clips: dict) -> dict:
             "clip_id": clip_id, "fields": fields, "job": None, "job_count": 0, "result": None}
 
 
-def _read_cases(clips: dict) -> list[dict]:
+def _read_cases(clips: dict, path: Path) -> list[dict]:
     """All test cases of the test list; raises ValueError listing every invalid entry."""
-    path = res("test_file")
     if not path.is_file():
         raise ValueError(f"Testliste {path} fehlt (Aufbau siehe README, Abschnitt Test-Modus).")
     document = json.loads(path.read_text(encoding="utf-8-sig"))
@@ -262,8 +263,50 @@ def _finish(run: dict) -> None:
 
 
 # --------- COMMAND ---------
-def start_test() -> None:
-    """Start a new test run from the test list, or resume the unfinished one."""
+def _write_qc_list(mapping: list[dict], state: dict) -> int:
+    """Write the QC test list with every clip whose proxy lies in its QC inbox; returns the number of tests."""
+    ctx, ranks = context(), {name: rank for rank, name in enumerate(priority(mapping, state, context())["qc"])}
+    picked = []
+    for clip in state["clips"].values():
+        proxy = clip["files"]["proxy"]
+        if not proxy or proxy["folder"].casefold() != qc_inbox(clip["collection"]).casefold():
+            continue
+        found = listing(ctx, proxy["folder"]).get(proxy["name"].casefold())
+        if found and found[1]:
+            picked.append(clip)
+            continue
+        issue(ctx, "test_qc_skipped", "Proxy ist leer" if found else "Proxy fehlt im QC-Eingang", clip["clip_id"],
+              f"{clip_text(clip)}; Datei {proxy['folder']}/{proxy['name']}")
+    picked.sort(key=lambda clip: (ranks.get(clip["collection"], len(ranks)), clip["queued_at"]))
+    tests = [{"name": f"{clip['identifier']} {clip['title']}".strip(), "stage": stage_labels["qc"], "clip_id": clip["clip_id"]}
+             for clip in picked]
+    write_text_atomic(res_dir / test_qc_file, json.dumps({"schema_version": 1, "tests": tests}, ensure_ascii=False, indent=2) + "\n")
+    skipped = len(ctx["issues"])
+    text = f"QC-Testliste {test_qc_file}: {len(tests)} Tests, {skipped} Clips übersprungen"
+    if skipped:
+        when = datetime.now().astimezone()
+        name = f"{file_stamp('test-qc', when)}_errors.txt"
+        write_new(error_dir / name, format_errors(ctx["issues"], when, "test-qc-Fehlerliste", test_qc_sections))
+        text += f"; Details: errors/{name}"
+    log(text + ".")
+    return len(tests)
+
+
+def start_qc_test() -> None:
+    """Generate the QC test list from marathon.json and start a test run with it; refused while a test run is open."""
+    check_root()
+    if run := _open_run(_load()):
+        raise RuntimeError(f"Test-Lauf {run['id']} ist offen ({_progress(run)}); keine neue QC-Testliste. "
+                           f"'test' setzt ihn fort, 'test-cancel' beendet ihn.")
+    if not state_path.exists():
+        raise RuntimeError("Noch keine JSON – keine Clips für die QC-Testliste (zuerst 'update-index' oder 'run').")
+    if not _write_qc_list(load_mapping(), load_state()):
+        raise RuntimeError("Kein Clip mit vorhandenem Proxy im QC-Eingang; kein Test-Lauf gestartet.")
+    start_test(test_qc_file)
+
+
+def start_test(test_file: str | None = None) -> None:
+    """Start a new test run from the test list (default [test] test_file), or resume the unfinished one."""
     check_root()
     data = _load()
     if run := _open_run(data):
@@ -271,11 +314,12 @@ def start_test() -> None:
         return
     if not state_path.exists():
         raise RuntimeError("Noch keine JSON – Test-Jobs brauchen die Clips aus marathon.json (zuerst 'update-index' oder 'run').")
-    cases = _read_cases(load_state()["clips"])
-    data["run"] = {"id": stamp(), "test_file": cfg["test_file"], "started_at": now(), "finished_at": None, "report": None,
+    test_file = test_file or cfg["test_file"]
+    cases = _read_cases(load_state()["clips"], res_dir / test_file)
+    data["run"] = {"id": stamp(), "test_file": test_file, "started_at": now(), "finished_at": None, "report": None,
                    "notes": [], "cases": cases}
     save_state(data, test_state_path)
-    log(f"Test-Lauf {data['run']['id']} gestartet: {len(cases)} Tests aus {cfg['test_file']}.")
+    log(f"Test-Lauf {data['run']['id']} gestartet: {len(cases)} Tests aus {test_file}.")
     if busy := _production_jobs(data):
         log(f"Hinweis: {busy} Produktions-Jobs liegen in offen/laufend. Worker nehmen ältere Jobs zuerst; "
             f"deren Reports bleiben liegen, bis 'run' sie einsammelt.")

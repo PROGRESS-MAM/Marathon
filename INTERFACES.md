@@ -20,7 +20,7 @@ Dieses Protokoll beschreibt alles, was zwischen Marathon und den Workern ausgeta
 
 | Komponente | Version | Dateien |
 |---|---|---|
-| Marathon | 1.11.0 | `marathon.py`, `core/` |
+| Marathon | 1.12.0 | `marathon.py`, `core/` |
 | Marathon-Adapter (gemeinsamer Teil aller Worker-Adapter) | 1.1.0 | `marathon/marathon_adapter.py` |
 | QC Marathon (QC-Adapter) | 2.0.0 | `marathon/qc_marathon.py`, `marathon/configs/` |
 | QC Worker | 2.0.0 | `qc_worker.py` |
@@ -220,6 +220,7 @@ Vorlage:
 
 | Datum | Antrag | Änderung |
 |---|---|---|
+| 2026-10-09 | – | Marathon 1.12.0: Befehl `test-qc` erzeugt Test-Jobs nach 3.11 aus der JSON; Schnittstelle unverändert |
 | 2026-10-09 | CR-002 | Marathon 1.11.0: Test-Modus mit Test-Jobs (3.1, 3.3 Feld `test`, 3.11); Worker unverändert |
 | 2026-10-09 | – | QC: Prüftools in `aqc/tools`, Plan-Schlüssel `tool`, Job-`schema_version` 5, FFE-Entscheidung und Referenzbild aus dem Job; Marathon unverändert |
 | 2026-10-09 | – | Protokoll angelegt aus Marathon 1.10.0, Marathon-Adapter 1.1.0, QC Marathon 2.0.0, QC Worker 2.0.0, AQC 0.3.0 |

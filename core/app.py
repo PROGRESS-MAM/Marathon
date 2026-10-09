@@ -20,7 +20,7 @@ from .jobs import process
 from .cleanup import begin_delete, delete_folders
 from .report import report
 from .ingest import ingest
-from .testrun import cancel_test, start_test, test_cycle, test_job_ids, test_status
+from .testrun import cancel_test, start_qc_test, start_test, test_cycle, test_job_ids, test_status
 
 
 # --------- FUNC ---------
@@ -181,8 +181,8 @@ def main(argv: list[str] | None = None) -> None:
                 if mode == "test":
                     log("Test-Modus angehalten; der Test-Lauf bleibt offen ('test' setzt ihn fort).")
                 mode, next_cycle, last_skip = "run", now, None
-            elif command == "test":
-                start_test()
+            elif command in ("test", "test-qc"):
+                (start_qc_test if command == "test-qc" else start_test)()
                 if mode == "run":
                     log("Job-Schleife angehalten; Produktions-Jobs und JSON bleiben unverändert.")
                 mode, next_cycle = "test", now
@@ -203,7 +203,7 @@ def main(argv: list[str] | None = None) -> None:
                 ingest(command.removeprefix("ingest-"))
             else:
                 update_index()
-            if command in ("run", "test", "test-cancel", "auto-report"):
+            if command in ("run", "test", "test-qc", "test-cancel", "auto-report"):
                 log(_status_text(mode, auto))
         except Exception as exc:
             log(f"{command!r} fehlgeschlagen: {exc}")
