@@ -6,7 +6,7 @@ from pathlib import Path
 from time import perf_counter
 
 from . import app_name, app_version
-from .constants import columns, count_columns, index_labels, index_sections, stages, summary_name
+from .constants import columns, count_columns, index_labels, index_missing, index_sections, stages, summary_name
 from .config import error_dir, reports_dir, state_path
 from .console import log
 from .util import context, file_stamp, format_errors, issue, now, summary_lines, write_new
@@ -25,7 +25,7 @@ def _totals(state: dict, mapping: list[dict]) -> dict[str, tuple[int, ...]]:
     totals = {entry["name"]: [0] * len(count_columns) for entry in mapping}
     for clip in state["clips"].values():
         row = totals.get(clip["collection"])
-        if row is None or not clip["active"]:
+        if row is None:
             continue
         row[0] += 1
         row[1 if clip["ready"] else 2 + stages.index(clip["stage"])] += 1
@@ -92,6 +92,13 @@ def _index_line(index: dict) -> str:
     return text + (f"; Details: errors/{index['error_list']}" if index.get("error_list") else "")
 
 
+def _missing_line(state: dict) -> str:
+    """Explicit hint on clips that update-index no longer found."""
+    inactive = sum(1 for clip in state["clips"].values() if (clip["issues"]["sticky"] or {}).get("category") == index_missing)
+    ready = state["index"].get("missing_ready") or 0
+    return f"{index_missing}: {inactive} Clips inaktiv" + (f", {ready} bereite Clips nur gemeldet" if ready else "")
+
+
 def report(kind: str) -> Path:
     """Report from the JSON and the folders; no search and no changes on the share."""
     started = perf_counter()
@@ -119,7 +126,8 @@ def report(kind: str) -> Path:
     when = datetime.now().astimezone()
     name = file_stamp(kind, when)
     watch, workers = watch_lines(view), worker_lines(view)
-    text = _render(kind, when, totals, prio, previous) + f"\n{_index_line(state['index'])}\n{ffe_line(state['ffe'])}\n\n"
+    text = _render(kind, when, totals, prio, previous) + f"\n{_index_line(state['index'])}\n{_missing_line(state)}\n"
+    text += f"{ffe_line(state['ffe'])}\n\n"
     text += "\n".join(final_lines(ctx)) + "\n\n"
     text += "\n".join(summary_lines(ctx["issues"])) + "\n"
     text += f"\nAuffällige laufende Jobs: {len(watch)}\n" + "".join(f"{line}\n" for line in watch)
@@ -132,7 +140,8 @@ def report(kind: str) -> Path:
     write_new(path, text)
     if ctx["issues"]:
         write_new(error_dir / f"{name}_errors.txt", format_errors(ctx["issues"], when))
-    log(f"{kind}-Bericht: {path.name}; {sum(row[0] for row in totals.values())} aktive Clips; "
+    inactive = sum(not clip["active"] for clip in view["clips"].values())
+    log(f"{kind}-Bericht: {path.name}; {sum(row[0] for row in totals.values())} Clips gezählt ({inactive} inaktiv); "
          f"{len(state['clips'])} Clips in der JSON; {len(ctx['issues'])} Meldungen; {len(watch)} auffällige Jobs; "
          f"Dauer: {perf_counter() - started:.1f} s.")
     return path

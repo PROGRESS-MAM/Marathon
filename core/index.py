@@ -4,16 +4,16 @@ from collections import defaultdict
 from datetime import datetime
 from time import perf_counter
 
-from .constants import field_names, index_sections, metadata_changed, problem_categories, tracked_fields
+from .constants import field_names, index_missing, index_sections, metadata_changed, problem_categories, tracked_fields
 from .console import log
 from .util import clip_text, context, details, file_stamp, format_detail, issue, normalize, now, write_lists
 from .layout import check_root, final_folder, load_mapping, master_folder, qc_inbox
-from .state import add_event, file_entry, keep_notes, load_state, new_clip, save_state
+from .state import add_event, file_entry, keep_notes, load_state, new_clip, save_state, set_issue
 from .naming import find_proxy
 from .ffe import apply_ffe, ffe_text, load_ffe_list
 from .search import search_clips
 from .veritone import intersect, veritone_clip_ids, veritone_token
-from .audit import missing_masters
+from .audit import missing_masters, status, update_activity
 
 
 # --------- FUNC ---------
@@ -85,9 +85,25 @@ def _fill(clip: dict, hit: dict) -> list[str]:
     return keys
 
 
-def _reconcile(state: dict, found: dict[str, list[dict]], ctx: dict, dropped: dict[str, tuple[str, str]] | None = None) -> int:
-    """Admit new clips and fill missing fields of known clips; other differences are only reported. Returns filled clips."""
-    clips, dropped, filled = state["clips"], dropped or {}, 0
+def _drop(clip: dict) -> str:
+    """Make a clip the search no longer finds inactive; ready clips are only reported. Returns the note for the list."""
+    if clip["ready"]:
+        return "Clip ist bereit, nur gemeldet"
+    sticky = clip["issues"]["sticky"]
+    if sticky:  # Keep the earlier reason; it says more about the clip.
+        return f"Clip bereits inaktiv ({sticky['category']})"
+    set_issue(clip, "sticky", index_missing, "Nicht mehr in der Suche gefunden (update-index)")
+    add_event(clip, index_missing)
+    update_activity(clip, context())  # Own context: the reason is already in the index error list.
+    clip["status"] = status(clip)
+    return "Clip inaktiv"
+
+
+def _reconcile(state: dict, found: dict[str, list[dict]], ctx: dict,
+               dropped: dict[str, tuple[str, str]] | None = None) -> tuple[int, int, int]:
+    """Admit new clips, fill missing fields of known clips and make known clips the search no longer finds inactive;
+    other differences are only reported. Returns filled, missing and missing ready clips."""
+    clips, dropped, filled, missing, missing_ready = state["clips"], dropped or {}, 0, 0, 0
     classified = {clip_id: _classify(clip_id, found.get(clip_id, []), dropped) for clip_id in {*found, *clips, *dropped}}
     groups, sources = defaultdict(list), {}
     for clip_id, (hit, _) in classified.items():
@@ -108,19 +124,21 @@ def _reconcile(state: dict, found: dict[str, list[dict]], ctx: dict, dropped: di
             _admit(clips, clip_id, hit, ctx)
         elif problem:
             section, index = ("deviation", 1) if clip else ("skipped", 0)
-            head = problem.get("head") or clip_text(clip or found[clip_id][0])
+            head, reason = problem.get("head") or clip_text(clip or found[clip_id][0]), problem.get("reason", "")
+            if clip and problem["kind"] in ("missing", "veritone"):  # No longer in EditShare ∩ Veritone.
+                reason, missing, missing_ready = f"{reason}; {_drop(clip)}", missing + 1, missing_ready + clip["ready"]
             issue(ctx, section, problem_categories[problem["kind"]][index], clip_id,
-                   format_detail(head, problem.get("reason", ""), problem.get("matches")))
+                   format_detail(head, reason, problem.get("matches")))
         else:
             filled += bool(_fill(clip, hit))
             if changes := _changes(clip, hit):
                 issue(ctx, "deviation", metadata_changed, clip_id, format_detail(clip_text(clip), changes))
-    return filled
+    return filled, missing, missing_ready
 
 
 # --------- COMMAND ---------
 def update_index() -> None:
-    """Search all collections; admit new clips, report differences for known clips without changing them; FFE match."""
+    """Search all collections; admit new clips, make known clips no longer found inactive, report other differences; FFE match."""
     started = perf_counter()
     log("Index-Aktualisierung gestartet.")
     mapping = load_mapping()
@@ -130,19 +148,20 @@ def update_index() -> None:
     before, token = len(state["clips"]), veritone_token()
     found = search_clips(mapping, ctx)
     found, dropped = intersect(found, veritone_clip_ids(mapping, token, ctx), mapping, ctx)
-    filled = _reconcile(state, found, ctx, dropped)
+    filled, missing, missing_ready = _reconcile(state, found, ctx, dropped)
     ffe_counts = apply_ffe(state, entries, ctx)
     index_issues = [item for item in ctx["issues"] if item["section"] in index_sections]
     counts = {section: len({item["key"] for item in index_issues if item["section"] == section}) for section in index_sections}
     when = datetime.now().astimezone()
     error_list, ambiguous_list = write_lists(ctx["issues"], when, file_stamp("index", when), "Index-Fehlerliste")
-    state["index"] = {"updated_at": now(), "counts": counts, "error_list": error_list}
+    state["index"] = {"updated_at": now(), "counts": counts, "error_list": error_list, "missing_ready": missing_ready}
     state["ffe"] = {"updated_at": now(), "counts": ffe_counts, "error_list": error_list if ffe_counts["missing"] else None,
                     "ambiguous_list": ambiguous_list}
     keep_notes(state, ctx["issues"])
     state["updated_at"] = now()
     save_state(state)
     log(f"Index aktualisiert: {len(state['clips']) - before} Clips neu aufgenommen, {filled} Clips ergänzt, "
-         f"{len(state['clips'])} in der JSON; {counts['skipped']} nicht aufgenommen; {counts['deviation']} Abweichungen; "
+         f"{len(state['clips'])} in der JSON; {missing} nicht mehr gefunden ({missing_ready} davon bereit); "
+         f"{counts['skipped']} nicht aufgenommen; {counts['deviation']} Abweichungen; "
          f"{counts['veritone_only']} nur bei Veritone; {counts['veritone_multi']} Veritone-ID uneindeutig"
          f"; {ffe_text(ffe_counts)}{details(error_list, ambiguous_list)}; Dauer: {perf_counter() - started:.1f} s.")

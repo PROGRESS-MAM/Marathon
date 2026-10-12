@@ -1,6 +1,6 @@
 # Marathon – Schnittstellenprotokoll
 
-Stand: 2026-10-09 · gültig für die Versionen in Abschnitt 1
+Stand: 2026-10-12 · gültig für die Versionen in Abschnitt 1
 
 Dieses Protokoll beschreibt alles, was zwischen Marathon und den Workern ausgetauscht wird. Es ersetzt das Hochladen der gesamten Codebase: Jeder Thread erhält diese Datei und nur den Code, der bearbeitet wird.
 
@@ -20,7 +20,7 @@ Dieses Protokoll beschreibt alles, was zwischen Marathon und den Workern ausgeta
 
 | Komponente | Version | Dateien |
 |---|---|---|
-| Marathon | 1.15.0 | `marathon.py`, `core/` |
+| Marathon | 1.16.0 | `marathon.py`, `core/` |
 | Marathon-Adapter (gemeinsamer Teil aller Worker-Adapter) | 1.1.1 | `marathon/marathon_adapter.py` |
 | QC Marathon (QC-Adapter) | 2.1.1 | `marathon/qc_marathon.py`, `marathon/configs/` |
 | QC Worker | 2.1.0 | `qc_worker.py` |
@@ -244,6 +244,7 @@ Vorlage:
 
 | Datum | Antrag | Änderung |
 |---|---|---|
+| 2026-10-12 | – | Marathon 1.16.0: Bericht zählt alle Clips der JSON, auch inaktive, in Gesamt und ihrer Stufe; Befehle `retry-restore`, `retry-transcode`, `retry-qc` geben alle inaktiven Clips einer Stufe ohne Bestätigung frei (Versuche auf 0); `update-index` setzt nicht mehr gefundene Clips inaktiv („Nicht mehr im Index“); Schnittstelle unverändert |
 | 2026-10-09 | – | Marathon 1.15.0: Befehl `retry-qc` gibt Clips mit „QC nicht bestanden“ zur QC-Neuprüfung frei; Schnittstelle unverändert |
 | 2026-10-09 | CR-003 | Marathon 1.14.0: liest den QC-Prüfbericht (3.12) für Detail- und Testbericht; QC-Ausgang mit nur dem Prüfbericht wird als `<work_dir>/qc/archiv/<job_id>.aqc.json` archiviert (3.6); Worker unverändert |
 | 2026-10-09 | – | QC Marathon 2.1.1: Prüfbericht in Konsole und Log ab `<work_dir>` gekürzt; Schnittstelle unverändert |

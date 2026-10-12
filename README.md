@@ -61,7 +61,9 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 | `update-ffe` | Nur FFE-Liste mit der bestehenden JSON abgleichen, ohne Suche |
 | `ingest-master` | Masterdateien aus `master_dir` über die DEFA-ID abgleichen und eintragen (weiter an Transcode); nur auf Befehl |
 | `ingest-proxy` | Proxys aus `proxy_dir` über die DEFA-ID abgleichen, umbenannt in den QC-Eingang verschieben (weiter an QC); nur auf Befehl |
-| `retry-qc` | Alle Clips mit „QC nicht bestanden“ zur QC-Neuprüfung freigeben; Bestätigung mit `freigeben` (siehe QC-Neuprüfung) |
+| `retry-restore` | Alle inaktiven Clips der Stufe Restore wieder freigeben (siehe Wieder freigeben) |
+| `retry-transcode` | Alle inaktiven Clips der Stufe Transcode wieder freigeben (siehe Wieder freigeben) |
+| `retry-qc` | Alle inaktiven Clips der Stufe QC wieder freigeben (siehe Wieder freigeben) |
 | `delete-folder` | SMB-Arbeitsordner bereinigen; Index bleibt, Prozesszustand wird neu aufgebaut. Bei Clip-/Mediendateien Bestätigung mit `loeschen`; gesperrt bei offenem Test-Lauf |
 | `status` | Anzeigen, was eingeschaltet ist, und Stand des Test-Laufs |
 | `help` | Befehlsübersicht |
@@ -80,6 +82,9 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 - Aufgenommen werden Clips, deren `001 Identifier` bei Veritone in derselben Kollektion als Barcode vorkommt; neue Clips erhalten `veritone_id`.
 - Barcode mit mehreren Assets: Clip ohne Veritone-ID, Eintrag in der Index-Fehlerliste (Abschnitt „Barcode mehrfach bei Veritone“).
 - Clips in der JSON: Fehlende Felder und eine leere Veritone-ID werden aus der Suche ergänzt (History `Fehlende Felder ergänzt`). Vorhandene Werte bleiben; Abweichungen stehen nur in der Index-Fehlerliste.
+- Clips in der JSON, die die Suche (EditShare ∩ Veritone) nicht mehr findet: Der Clip wird inaktiv (`Nicht mehr im Index`), bleibt in seiner Stufe und zählt weiter in Gesamt. Eintrag in der Index-Fehlerliste; der Bericht zeigt die Anzahl in der Zeile `Nicht mehr im Index`. Bereite Clips bleiben aktiv und werden nur gemeldet; ein bereits inaktiver Clip behält seinen bisherigen Grund.
+- Ein später wieder gefundener Clip bleibt inaktiv, bis er mit `retry-<stufe>` freigegeben wird.
+- Nur `update-index` sucht. `run` führt `update-index` nur aus, wenn noch keine JSON existiert; Job-Schleife und Berichte suchen nie.
 
 ## Prioliste und Jobs
 
@@ -148,7 +153,7 @@ Maßgeblich ist der Wert beim Erstellen des Jobs.
 **Prüfung nach Transcode:**
 
 - Proxy und gemeldeter neuer Master müssen vorhanden und größer als 0 Byte sein, Namen wie oben. Sonst gilt der Job als fehlgeschlagen: Teilergebnisse werden gelöscht, neuer Versuch bis `max_job_attempts`. Eine nicht gemeldete zweite Mediendatei zählt als zweiter Proxy und lässt den Job ebenfalls fehlschlagen.
-- Der neue Master wird nach `[ingest] master_dir` verschoben, nie überschrieben. Bei Namenskonflikt oder wenn das Verschieben nicht möglich ist, wird der Clip inaktiv (`Neuer Master blockiert`), der Ausgang archiviert, nichts gelöscht.
+- Der neue Master wird nach `[ingest] master_dir` verschoben, nie überschrieben. Bei Namenskonflikt oder wenn das Verschieben nicht möglich ist, wird der Clip inaktiv (`Neuer Master blockiert`), der Ausgang archiviert, nichts gelöscht. Konflikt in `master_dir` lösen, dann `retry-transcode` (der Transcode läuft neu).
 - Danach verfolgt Marathon den neuen Master nicht weiter (nur History `Neuer Master abgelegt`); `delete-folder` ordnet ihn nicht wieder zu.
 
 **Nach QC:**
@@ -161,6 +166,7 @@ Maßgeblich ist der Wert beim Erstellen des Jobs.
 - Reihenfolge bei bestandenem QC: Proxy ausliefern, Master aus Restore löschen, EditShare-Feld setzen. Masterdateien aus `ingest-master` werden nie gelöscht.
 - Vor der Auslieferung muss der Proxy vorhanden und größer als 0 Byte sein.
 - QC nicht bestanden: Clip inaktiv (`QC nicht bestanden`), Eintrag in der Fehlerliste des Berichts, Gründe im Detailbericht QC.
+- Zielordner enthält schon eine Datei mit dem Proxy-Namen: Clip inaktiv (`Auslieferung blockiert`), Proxy bleibt im QC-Eingang. Datei im Zielordner entfernen, dann `retry-qc` (der QC läuft neu, danach die Auslieferung).
 - Archiv: Job-Datei und Report liegen in `<work_dir>/<stufe>/archiv/`. Enthält der QC-Ausgang nur den Prüfbericht, liegt er dort als `<job_id>.aqc.json`; sonst wird der Ausgang als Ordner `…/<stufe>/archiv/<job_id>.ausgang` archiviert.
 
 **EditShare-Feld:**
@@ -210,14 +216,15 @@ QC zusätzlich: „Nicht bestanden nach Kriterium“ – wie oft jedes Kriterium
 
 `Ablage` zeigt den archivierten Ausgang des Jobs, sofern vorhanden.
 
-## QC-Neuprüfung (`retry-qc`)
+## Wieder freigeben (`retry-restore`, `retry-transcode`, `retry-qc`)
 
-Gibt alle Clips mit „QC nicht bestanden“ erneut zur QC frei, z. B. nach einer geänderten QC-Metrik.
+Gibt alle inaktiven Clips einer Stufe wieder frei, z. B. nach einer geänderten QC-Metrik oder nachdem eine Blockierung beseitigt wurde.
 
-- `retry-qc` zeigt zuerst eine Vorschau: Anzahl der Clips je Kollektion und Anzahl der übersprungenen. Erst `freigeben` führt die Freigabe aus; jede andere Eingabe bricht ab, ohne etwas zu ändern.
-- Freigegeben werden Clips in der Stufe QC ohne laufenden Job, deren Proxy im QC-Eingang liegt und nicht leer ist. Alle anderen stehen in `reports/errors/retry-qc_<stempel>_errors.txt`, Abschnitt „Nicht zur QC-Neuprüfung freigegeben“.
-- Die Clips behalten ihre ursprüngliche Eingangszeit. Die Job-Schleife legt die neuen QC-Jobs wie gewohnt nach Prioliste und `[limits] qc` aus; die Ergebnisse stehen im nächsten Detailbericht QC.
-- Im Verlauf des Clips steht „Zur QC-Neuprüfung freigegeben“ mit dem bisherigen Grund.
+- Freigegeben werden alle Clips der Stufe ohne laufenden Job mit einem dieser Gründe: `QC nicht bestanden`, `Job endgültig fehlgeschlagen`, `Neuer Master blockiert`, `Auslieferung blockiert`, `Zuordnung beim Neuaufbau unklar`, `Nicht mehr im Index`.
+- Ohne Vorschau und ohne Bestätigung. Das Log zeigt die Anzahl je Kollektion und die Anzahl der Clips mit laufendem Job (übersprungen).
+- Die Versuche werden auf 0 gesetzt. Die Clips bleiben in ihrer Stufe und behalten ihre Eingangszeit; die Job-Schleife legt die Jobs wie gewohnt nach Prioliste und `[limits]` aus.
+- Gründe, die Marathon in jedem Job-Zyklus selbst prüft (`Verloren – Master fehlt vor Transcode`, `Verloren – Proxy fehlt`, `Veritone-ID fehlt`), bleiben unberührt; sie entfallen von selbst, sobald Datei bzw. ID vorhanden sind.
+- Im Verlauf des Clips steht „Für <Stufe> wieder freigegeben“ mit dem bisherigen Grund.
 - Auch bei angehaltener Job-Schleife oder offenem Test-Lauf möglich; die Jobs entstehen, sobald die Job-Schleife läuft.
 
 Empfohlener Ablauf nach einer geänderten QC-Metrik: Metrik anpassen → `test-qc` (Testbericht prüfen) → `retry-qc`.
@@ -415,7 +422,7 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 ## Ausgaben
 
 - `log/marathon.log` – Protokoll
-- `reports/<art>_<stempel>.txt` – Berichte
+- `reports/<art>_<stempel>.txt` – Berichte; Gesamt zählt alle Clips der JSON, auch inaktive, jeweils in ihrer aktuellen Stufe bzw. unter Bereit
 - `reports/errors/index_<stempel>_errors.txt` – Fehlerliste von `update-index` (inklusive nicht gefundener FFE-Titel)
 - `reports/errors/ffe_<stempel>_errors.txt` – nicht gefundene FFE-Titel von `update-ffe`
 - `reports/errors/<index|ffe>_<stempel>_ffe_uneindeutig.txt` – uneindeutige FFE-Treffer
@@ -425,5 +432,4 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 - `reports/test_<stempel>.txt` – Testbericht eines Test-Laufs
 - `state/journal_<stufe>.jsonl` – Job-Protokoll seit dem letzten Detailbericht; danach in `state/journal/details_<stufe>_<stempel>.jsonl`
 - `reports/errors/test-qc_<stempel>_errors.txt` – von `test-qc` übersprungene Clips
-- `reports/errors/retry-qc_<stempel>_errors.txt` – von `retry-qc` übersprungene Clips
 - `test/test.json` – Stand des Test-Modus (offener Test-Lauf, IDs aller Test-Jobs); nicht löschen, solange Test-Jobs auf dem SMB liegen
