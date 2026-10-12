@@ -22,9 +22,9 @@ Dieses Protokoll beschreibt alles, was zwischen Marathon und den Workern ausgeta
 |---|---|---|
 | Marathon | 1.16.0 | `marathon.py`, `core/` |
 | Marathon-Adapter (gemeinsamer Teil aller Worker-Adapter) | 1.1.1 | `marathon/marathon_adapter.py` |
-| QC Marathon (QC-Adapter) | 2.1.1 | `marathon/qc_marathon.py`, `marathon/configs/` |
+| QC Marathon (QC-Adapter) | 2.2.0 | `marathon/qc_marathon.py`, `marathon/configs/` |
 | QC Worker | 2.1.0 | `qc_worker.py` |
-| AQC (Prüftools) | 0.3.1 | `aqc/`, `aqc/tools/` |
+| AQC (Prüftools) | 0.4.0 | `aqc/`, `aqc/tools/` |
 | Restore-Worker | nicht dokumentiert | – |
 | Transcode-Worker | nicht dokumentiert | – |
 
@@ -169,7 +169,7 @@ Danach archiviert Marathon Job-Datei und Report (`<job_id>.report.json`) in `<wo
 
 ### 3.10 Stufen-Worker
 
-**QC (QC Marathon 2.1.1)**
+**QC (QC Marathon 2.2.0)**
 
 - Prüfplan `proxy_standard`: `stream_specs(video_1080p)`, `stream_specs(audio_aac_stereo)`, `digital_silence(keine_stille)`.
 - Bei `ffe_tafel: true` zusätzlich `ffe_tafel`: `reference_frame(FFE_tafel_start_ok)` und `reference_frame(FFE_tafel_ende_not_ok)` mit `must_fail`; Referenzbild aus `ffe_reference_image`.
@@ -244,6 +244,7 @@ Vorlage:
 
 | Datum | Antrag | Änderung |
 |---|---|---|
+| 2026-10-12 | – | AQC 0.4.0, QC Marathon 2.2.0: `digital_silence` prüft je Kanal, ob er Ton enthält (Anteil der Fenster mit RMS ab `threshold` mindestens `min_active`), statt einzelne Stille-Abschnitte zu melden; Config `keine_stille` mit `threshold`, `min_active`, `window`. Prüfbericht (3.12): je stummem Kanal ein Eintrag in `failures` mit `criterion` `min_active` und `tc` null, `info` je Stream mit `Ist-Werte:`; Label `digital_silence(keine_stille)` unverändert; Schnittstelle unverändert |
 | 2026-10-12 | – | Marathon 1.16.0: Bericht zählt alle Clips der JSON, auch inaktive, in Gesamt und ihrer Stufe; Befehle `retry-restore`, `retry-transcode`, `retry-qc` geben alle inaktiven Clips einer Stufe ohne Bestätigung frei (Versuche auf 0); `update-index` setzt nicht mehr gefundene Clips inaktiv („Nicht mehr im Index“); Schnittstelle unverändert |
 | 2026-10-09 | – | Marathon 1.15.0: Befehl `retry-qc` gibt Clips mit „QC nicht bestanden“ zur QC-Neuprüfung frei; Schnittstelle unverändert |
 | 2026-10-09 | CR-003 | Marathon 1.14.0: liest den QC-Prüfbericht (3.12) für Detail- und Testbericht; QC-Ausgang mit nur dem Prüfbericht wird als `<work_dir>/qc/archiv/<job_id>.aqc.json` archiviert (3.6); Worker unverändert |
