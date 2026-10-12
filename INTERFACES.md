@@ -240,6 +240,22 @@ Vorlage:
 - Version: Marathon 1.14.0; keine neue `schema_version`
 - Übergang: bestehende Worker bleiben unverändert lauffähig
 
+### CR-004 Run-Status ohne Testlauf-Angaben
+
+- Von → an: Bedienung → Marathon
+- Stand: offen
+- Inhalt: Beim Start mit Befehl `run` enthält die Statuszeile keine Angaben zum letzten Test-Lauf mehr. Bisher: `Status: Job-Schleife läuft; Test-Modus aus (Test-Lauf 20261009T140942525261 abgeschlossen: 3041/3041 fertig (abgebrochen 2957, ok 44, rejected 40)); Auto-Bericht aus.` Künftig: `Status: Job-Schleife läuft; Test-Modus aus; Auto-Bericht aus.` Nur Konsolenausgabe; Schnittstelle unverändert.
+- Version: Marathon 1.16.1; keine neue `schema_version`
+- Übergang: Worker unverändert
+
+### CR-005 AQC-Konsolenpfade gekürzt
+
+- Von → an: Bedienung → AQC
+- Stand: offen
+- Inhalt: Alle Pfade in den Konsolenausgaben (`print`) von AQC werden ab einschließlich `.marathon` gekürzt, z. B. `.marathon/qc/…`. Nur Konsolenausgabe; Prüfbericht (3.12) und Schnittstelle unverändert.
+- Version: AQC 0.4.1; keine neue `schema_version`
+- Übergang: Marathon und QC Marathon unverändert
+
 ## 5. Änderungsprotokoll
 
 | Datum | Antrag | Änderung |
