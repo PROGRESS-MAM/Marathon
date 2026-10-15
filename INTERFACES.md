@@ -26,7 +26,7 @@ Dieses Protokoll beschreibt alles, was zwischen Marathon und den Workern ausgeta
 | QC Marathon (QC-Adapter) | 2.2.1 | `marathon/qc_marathon.py`, `marathon/configs/` |
 | QC Worker | 2.1.0 | `qc_worker.py` |
 | AQC (Prüftools) | 0.4.1 | `aqc/`, `aqc/tools/` |
-| Restore-Worker (ES-Restore) | 0.2.1 (Restorer 0.2.1, Restore Marathon 0.1.1) | `restorer/`, `marathon/restore_marathon.py`; läuft mit Marathon erst nach CR-006 bis CR-011 |
+| Restore-Worker (ES-Restore) | 0.2.1 (Restorer 0.2.1, Restore Marathon 0.1.1) | `restorer/`, `marathon/restore_marathon.py`; läuft mit Marathon erst nach CR-006 bis CR-014 |
 | Transcode-Worker | nicht dokumentiert | – |
 
 Job-`schema_version`: Marathon 1.16.0 schreibt **5** (alle Stufen). Der Marathon-Adapter 1.2.0 nimmt nur `(6,)` an; Marathon schreibt 6 ab Fahrplan-Schritt 3. Keine Abwärtskompatibilität: alle Komponenten werden gemeinsam auf 6 umgestellt.
@@ -254,7 +254,7 @@ Vorlage:
 ### CR-005 AQC-Konsolenpfade gekürzt
 
 - Von → an: Bedienung → AQC
-- Stand: umgesetzt in AQC 0.4.1; erledigt mit dem Build in Schritt 2
+- Stand: erledigt
 - Inhalt: Alle Pfade in den Konsolenausgaben (`print`) von AQC werden ab einschließlich `.marathon` gekürzt, z. B. `.marathon/qc/…`. Nur Konsolenausgabe; Prüfbericht (3.12) und Schnittstelle unverändert.
 - Version: AQC 0.4.1; keine neue `schema_version`
 - Übergang: Marathon und QC Marathon unverändert
@@ -264,7 +264,7 @@ Vorlage:
 - Von → an: Marathon → Restore-Worker (ES-Restore), Marathon-Adapter
 - Stand: umgesetzt in Restore-Worker 0.2.1 und Marathon-Adapter 1.2.0; offen in Marathon
 - Inhalt:
-  - Ein Restore-Job enthält Dateien mehrerer Clips; Marathon fasst sie nach Band zusammen.
+  - Ein Restore-Job enthält Dateien mehrerer Clips; Marathon fasst sie nach Band zusammen (CR-012).
   - Job (3.3), Stufe Restore: `clip_id`, `collection`, `identifier`, `title`, `clip_name`, `files` und `hashes` entfallen. Neu `items` (list[object], mindestens ein Eintrag, je Datei ein Eintrag):
 
     | Feld | Typ | Pflicht | Inhalt |
@@ -273,10 +273,11 @@ Vorlage:
     | `clip_name` | str | ja | Name des Clip-Ordners im Ausgang |
     | `file` | str | ja | physischer Dateiname aus dem Userpath, kein Clip- oder Asset-Name |
     | `flow_hash` | str | ja | FLOW-Hash Version 2, Form `2:<hex>` |
-    | `tape` | str | ja | Barcode des Bands |
+    | `tape` | str | ja | Barcode des Bands, von dem der Worker die Datei liest; Marathon wählt es aus den Bändern der Datei (EditShare `backup_locations[].tapes`), ohne Formatprüfung |
     | `size` | int | ja | Dateigröße in Byte |
 
-  - `job_id` bleibt der Dateiname ohne `.json`; die Form für Sammeljobs legt Marathon fest.
+  - `job_id` bleibt der Dateiname ohne `.json`; Form für Sammeljobs `<Zeitstempel>__<n>_restore`, `<n>` = laufende Nummer der Restore-Jobs in Marathon.
+  - `output_folder` = `<work_dir>/restore/ausgang/<job_id>` (ein Ausgang für alle Kollektionen); die Restore-Ordner je Kollektion (3.1) entfallen.
   - Ergebnis (3.4), Restore: je Eintrag `<output_folder>/<Clip-Ordner>/<file>`.
     - Clip-Ordner = `clip_name`; Zeichen `<>:"/\|?*` und Steuerzeichen werden zu `_`, Punkte und Leerzeichen am Ende entfallen.
     - Ergibt sich derselbe Clip-Ordner (ohne Unterscheidung von Groß-/Kleinschreibung) für verschiedene `clip_id` im selben Job, erhält der erste Clip den Namen ohne Zusatz, jeder weitere `<Clip-Ordner>__2`, `__3` … in der Reihenfolge des ersten Auftretens in `items`.
@@ -292,11 +293,11 @@ Vorlage:
     | `reason` | str/null | bei `failed`: Kurztext, sonst null |
 
     Report-`status` ist `ok`, wenn alle Einträge `restored` sind, sonst `failed`.
-  - Auswertung (3.6), Restore, Status `ok` und `failed`, je Clip (alle Einträge mit derselben `clip_id`):
-    - Vollständiger Clip: alle Einträge `restored` und nach 3.4 vorhanden. Er gilt als restauriert, auch wenn der Job `failed` ist, und geht mit den Dateien aus `path` in den Transcode-Eingang (`…/transcode/eingang/<clip_id>/`).
+  - Auswertung (3.6), Restore, Status `ok` und `failed`, je Clip (alle Einträge mit derselben `clip_id`); Teilberichte nach CR-014 werden genauso ausgewertet, jeder Clip nur einmal:
+    - Vollständiger Clip: alle Einträge `restored`, `path` liegt im `output_folder` des Jobs und die Datei ist nach 3.4 vorhanden. Er gilt als restauriert, auch wenn der Job `failed` ist, und geht mit den Dateien aus `path` in den Transcode-Eingang (`…/transcode/eingang/<clip_id>/`).
     - Unvollständiger Clip: mindestens ein Eintrag fehlt. Marathon löscht seinen Clip-Ordner samt bereits restaurierter Dateien und meldet die Gründe aus `reason` im Bericht. Restore hat je Clip genau einen Versuch, unabhängig von `max_job_attempts` (gilt für Transcode und QC unverändert): kein neuer Job, Clip inaktiv „Job endgültig fehlgeschlagen“.
-    - Fehlt `items` im Report oder ist es ungültig, gilt jeder Clip als unvollständig.
-    - Danach wird der Ausgang gelöscht.
+    - Fehlt `items` im Report oder ist es ungültig, gilt jeder noch nicht ausgewertete Clip als unvollständig.
+    - Nach dem Report wird der Ausgang gelöscht; Job-Datei, Report und Teilberichte werden archiviert.
 - Version: `schema_version` 6 für alle Stufen; Marathon-Adapter nimmt nur `(6,)` an (CR-007); Restore-Worker nimmt `6` an
 - Übergang: keiner; Marathon und alle Worker werden gemeinsam auf `schema_version` 6 umgestellt. QC- und Transcode-Felder unverändert; QC-Worker brauchen nur den Marathon-Adapter 1.2.0
 
@@ -348,23 +349,50 @@ Vorlage:
 - Version: Marathon-Adapter 1.2.0, gemeinsam mit CR-001 und CR-007 bis CR-010; keine neue `schema_version`; Marathon unverändert
 - Übergang: keiner; vor dem ersten Start mit Adapter 1.2.0 alte Heartbeat-Dateien `<work_dir>/worker/<Rechnername>.json` und Ordner `<work_dir>/<stufe>/laufend/<Rechnername>/` von Hand löschen, sonst führt Marathon sie weiter als Worker ohne Lebenszeichen. QC Marathon braucht nur die neue Adapter-Kopie; seine README („Der Worker heißt wie der Rechner“) anpassen.
 
-### CR-012 Größe der Restore-Sammeljobs
+### CR-012 Auswahl und Größe der Restore-Sammeljobs
 
 - Von → an: Bedienung → Marathon
 - Stand: offen
 - Inhalt:
-  - Marathon schreibt je Restore-Job mehrere Dateien in `items` (CR-006), höchstens `[restore] max_job_files` aus `res/config.ini` (Pflichteintrag, ganze Zahl ≥ 1; 1 ergibt einen Clip je Job).
-  - Ein Clip wird nie auf mehrere Jobs verteilt. Hat ein Clip mehr Dateien als `max_job_files`, kommt er allein in einen Job.
-  - Clips werden nach Band zusammengefasst (`tape` der Einträge); ein Job enthält möglichst nur Clips desselben Bands. Wie Clips mit Dateien auf mehreren Bändern zugeordnet werden, legt Marathon fest.
-  - Liegen weniger offene Dateien vor, wird der Job mit weniger Einträgen ausgelegt; Marathon wartet nicht, bis `max_job_files` erreicht ist.
-  - Der Restore-Worker nimmt jede Anzahl von Einträgen an; seine Seite ändert sich nicht.
+  - Gleichzeitig (offen oder laufend) höchstens ein großer und ein kleiner Restore-Job. `[limits] restore` in `res/config.ini`: `0` = keine neuen Restore-Jobs, `1` = nur großer Job, `2` = großer und kleiner Job. Neuer Pflichteintrag `[restore] small_job_clips` (ganze Zahl ≥ 1, vorgesehen 10).
+  - Wartender Clip: aktiv, Stufe Restore, ohne Job. Ein Clip wird nie auf mehrere Jobs verteilt.
+  - Hauptband eines Clips: ein Band, auf dem jede Datei des Clips eine Kopie hat. Gibt es keines, das Band mit den meisten Dateien des Clips; die übrigen Dateien stehen mit einem ihrer eigenen Bänder als `tape` im selben Job (zusätzlicher Ark-Job beim Worker).
+  - Zwei Restore-Jobs haben nie dasselbe Hauptband.
+  - Großer Job: oberste Kollektion der Prioliste mit wartenden Clips; deren Hauptband mit den meisten Clips dieser Kollektion; der Job enthält alle wartenden Clips mit diesem Hauptband aus allen Kollektionen. Keine Obergrenze für Clips, Dateien oder Größe.
+  - Kleiner Job: höchstens `small_job_clips` Clips. Ein ganzes Hauptband mit höchstens `small_job_clips` wartenden Clips, bei mehreren das mit den meisten Clips der obersten Kollektionen der Prioliste; gibt es keines, die `small_job_clips` höchstpriorisierten Clips des Hauptbands, das als nächster großer Job gewählt würde.
+  - Restore-Worker: Seite unverändert bis auf CR-013.
 - Version: Marathon 1.17.0, gemeinsam mit CR-006; keine weitere `schema_version`
-- Übergang: wie CR-006
+- Übergang: wie CR-006; `[restore] max_job_files` aus der früheren Fassung dieses Antrags entfällt
+
+### CR-013 Bandsperre und Warten auf Speicherplatz im Restore-Worker
+
+- Von → an: Marathon → Restore-Worker (ES-Restore)
+- Stand: offen
+- Inhalt:
+  - Der Worker startet keinen Ark-Job auf einem Band, solange ein eigener Ark-Job auf diesem Band wartet oder läuft, auch wenn er zu einem anderen Restore-Job gehört; der neue Ark-Job wartet, bis der vorige beendet ist.
+  - Reicht der Speicherplatz für einen Ark-Job nicht, wartet der Worker und prüft erneut, statt die Dateien mit `NO_SPACE` scheitern zu lassen; die Statusanzeige nennt den fehlenden Platz.
+  - Betrieb: `max_ark_queue = 1` (wartende fremde Ark-Jobs zählen mit).
+  - Schnittstelle zu Marathon unverändert.
+- Version: Restore-Worker 0.3.0; keine neue `schema_version`
+- Übergang: keiner
+
+### CR-014 Teilberichte je Clip
+
+- Von → an: Marathon → Restore-Worker (ES-Restore), Marathon-Adapter
+- Stand: offen
+- Inhalt:
+  - Marathon-Adapter, neue Hilfe in `run_stream`: `report_items(job_id, items)` schreibt einen Teilbericht `<report_folder>/<job_id>.teil-<Zeitstempel>.json` (Zeitstempel `YYYYMMDDTHHMMSSffffff`) über einen temporären Namen wie 3.5. Inhalt `{"job_id": str, "items": list[object]}`, `items` wie im Report (CR-006). Für einen nicht übernommenen oder schon gemeldeten Job oder bei leerem bzw. ungültigem `items`: `ValueError`. Heartbeat unverändert.
+  - Restore-Worker: Sind alle Einträge eines Clips abgeschlossen (`restored` oder `failed`), meldet er den Clip mit allen seinen Einträgen über `report_items` und ändert dessen Clip-Ordner danach nicht mehr. Der Report am Ende (CR-006) enthält weiterhin alle Einträge.
+  - Marathon: wertet Teilberichte schon während des Jobs in Namensreihenfolge je Clip nach CR-006 aus und archiviert sie als `<work_dir>/restore/archiv/<Dateiname ohne .json>.report.json`. Ein schon ausgewerteter Clip wird in weiteren Teilberichten und im Report übergangen. Enthält ein Teilbericht nicht alle Einträge eines Clips, wird dieser Clip erst mit dem Report ausgewertet. Teilberichte zu Jobs, die Marathon nicht führt, werden archiviert.
+- Version: Marathon-Adapter 1.3.0, Restore-Worker 0.3.0, Marathon 1.17.0; keine neue `schema_version`
+- Übergang: Teilberichte sind optional; Marathon 1.17.0 wertet ohne sie alles mit dem Report aus. QC Marathon nutzt die Hilfe nicht und übernimmt Adapter 1.3.0 beim nächsten Build ohne Änderung
 
 ## 5. Änderungsprotokoll
 
 | Datum | Antrag | Änderung |
 |---|---|---|
+| 2026-10-15 | CR-006, CR-012 bis CR-014 | Anträge: CR-006 (Quelle von `tape`, Form der `job_id`, ein Restore-Ausgang für alle Kollektionen, Teilberichte), CR-012 neu gefasst (großer und kleiner Job, `small_job_clips`, `[limits] restore` 0/1/2), CR-013 und CR-014 neu; Fahrplan Schritte 3 bis 6 angepasst; Vertrag (Abschnitt 3) unverändert |
+| 2026-10-15 | – | Fahrplan Schritt 2 erledigt; CR-005 erledigt |
 | 2026-10-15 | CR-005, CR-011 | QC Marathon 2.2.1 mit Marathon-Adapter 1.2.0, Konsolenzeilen `Eingang` und `Referenzbild` ab `<work_dir>` gekürzt, README: Worker-Name `<Rechnername>-QC`, `laufend/<Rechnername>-QC/`, Heartbeat `<Rechnername>-QC.json` mit `job_ids`, `schema_version` 6. AQC 0.4.1: Pfade in allen AQC-Konsolenzeilen (direkt oder über `on_progress`) ab `.marathon` gekürzt; Prüfbericht (3.12) unverändert; Schnittstelle unverändert |
 | 2026-10-14 | CR-001, CR-007 bis CR-011 | Marathon-Adapter 1.2.0 (Referenzkopie in AQC): `share_path` nach neuer Regel (Marathon benennt Pfade, Worker benutzen sie; relativ oder vollständig), `JobReport` mit `items` und `new_master`, nur `schema_version` 6, `Settings.resume`, `run_stream`/`claim`/`report`, Heartbeat `job_ids`, mehrzeiliges `status`, Worker-Name `<Rechnername>-<stage>`; Abwärtskompatibilität gestrichen (CR-006, CR-007, CR-011, Fahrplan); Vertrag (Abschnitt 3) unverändert bis Schritt 5 |
 | 2026-10-14 | – | Restore-Worker 0.2.1: Restorer als Paket `restorer/`; Schnittstelle unverändert |
@@ -388,9 +416,10 @@ Alle offenen Anträge außer CR-001 (Transcode) dienen dieser Umstellung. Reihen
 | Schritt | Komponente, neue Version | Anträge | Dateien | Voraussetzung | Prüfung | Erledigt |
 |---|---|---|---|---|---|---|
 | 1 | Marathon-Adapter 1.2.0 (Referenzkopie) | CR-001, CR-007, CR-008, CR-009 (Adapter-Teil), CR-010, CR-011 | `marathon/marathon_adapter.py`; `marathon/qc_marathon.py` nur zum Prüfen | – | QC Marathon läuft unverändert mit `run` und `resume=False` auf Jobs mit `schema_version` 6, Jobs mit 5 werden `failed`; Worker-Name `<Rechnername>-QC`; `run_stream`, `claim`, `report` mit `items`, `resume`, `job_ids` und mehrzeiliges `status` lokal geprüft | 2026-10-14, Marathon-Adapter 1.2.0 (lokal geprüft mit Platzhaltern für `qc_worker`, `restorer` und `toolbox`; QC Marathon 2.2.0 und Restore Marathon 0.1.1 unverändert) |
-| 2 | QC Marathon 2.2.1 (Kopie des Adapters 1.2.0, README zum Worker-Namen); optional AQC 0.4.1 | CR-011 (Betrieb), optional CR-005 | `marathon/qc_marathon.py`, `marathon/marathon_adapter.py` 1.2.0, `README.md`; bei CR-005 `aqc/` | Schritt 1 | Neue EXE gebaut; je Rechner vor dem ersten Start alte Datei `<work_dir>/worker/<Rechnername>.json` und Ordner `<work_dir>/qc/laufend/<Rechnername>/` löschen, neue EXE starten; Heartbeat `<Rechnername>-QC.json` erscheint. QC-Jobs laufen erst mit Marathon 1.17.0 (Schritt 3) | Code 2026-10-15 (QC Marathon 2.2.1, AQC 0.4.1); Build und Start offen |
-| 3 | Marathon 1.17.0 | CR-006, CR-009 (Marathon-Teil), CR-012, optional CR-004 | `marathon.py`, `core/` (mindestens `jobs.py`, `workers.py`, `cleanup.py`, `config.py`), `res/config.ini` | Schritt 2 (Marathon schreibt dann `schema_version` 6 für alle Stufen); vor dem Start keine Jobs mit `schema_version` 5 in `*/offen/` oder `*/laufend/` (von Hand löschen) | Im Thread zu klären: Quelle von `file`, `tape` und `size` je Datei, Form der `job_id` für Sammeljobs. Prüfen: Restore-Jobs mit `items` nach CR-006 und CR-012 (vor dem Start eines Restore-Workers in `restore/offen/` ansehen); Auswertung je Clip mit einem Report von Hand (vollständiger und unvollständiger Clip); QC-Jobs mit `schema_version` 6 laufen durch; Meldung „anderer Job“ und Sperre von `delete-folder` mit `job_ids` | |
-| 4 | ES-Restore 0.2.1 / Restore Marathon 0.1.1 in Betrieb | – (Seite bereits umgesetzt) | `marathon/marathon_adapter.py` 1.2.0 nach ES-Restore kopieren; `marathon/cred.env` | Schritt 3 | EXE gebaut; erster Lauf mit kleinem `max_job_files` (z. B. 2) und einem Restore-Worker; Report `items` je Datei, Marathon übernimmt vollständige Clips nach Transcode und löscht unvollständige; Neustart des Workers während eines laufenden Ark-Jobs übernimmt ihn ohne zweiten Ark-Job; danach `max_job_files` erhöhen | |
-| 5 | Abschluss dieser Datei | Regel 4 | `INTERFACES.md` | Schritte 1 bis 4 | Abschnitt 3 nachgezogen: 2. Worker-Name und Pfade (relativ oder vollständig), 3.3 Restore-Felder, 3.4 Restore-Ergebnis, 3.5 Report-Feld `items`, 3.6 Auswertung je Clip, 3.7 `job_ids`, 3.9 Adapter-Schnittstelle 1.2.0 (inkl. `share_path` nach CR-001), 3.10 Restore-Worker; CR-001 und CR-006 bis CR-012 auf `erledigt`; Abschnitt 1 und 5 aktualisiert | |
+| 2 | QC Marathon 2.2.1 (Kopie des Adapters 1.2.0, README zum Worker-Namen); optional AQC 0.4.1 | CR-011 (Betrieb), optional CR-005 | `marathon/qc_marathon.py`, `marathon/marathon_adapter.py` 1.2.0, `README.md`; bei CR-005 `aqc/` | Schritt 1 | Neue EXE gebaut; je Rechner vor dem ersten Start alte Datei `<work_dir>/worker/<Rechnername>.json` und Ordner `<work_dir>/qc/laufend/<Rechnername>/` löschen, neue EXE starten; Heartbeat `<Rechnername>-QC.json` erscheint. QC-Jobs laufen erst mit Marathon 1.17.0 (Schritt 3) | 2026-10-15, QC Marathon 2.2.1 mit AQC 0.4.1 (EXE gebaut, Heartbeat `<Rechnername>-QC.json` erscheint) |
+| 3 | Marathon 1.17.0 mit Transfer-Script JSON 7 → 8 | CR-006, CR-009 (Marathon-Teil), CR-012, CR-014 (Marathon-Teil), optional CR-004 | `marathon.py`, `core/`, `res/config.ini`, `README.md` | Schritt 2 (Marathon schreibt dann `schema_version` 6 für alle Stufen); vor dem Start keine Jobs mit `schema_version` 5 in `*/offen/` oder `*/laufend/` (von Hand löschen) | Festgelegt: `file`, `flow_hash`, `size` je Datei aus EditShare `video.file`, `audio.file`, `data.file`; `tape` aus `backup_locations[].tapes`; `job_id` `<Zeitstempel>__<n>_restore`. Prüfen: Transfer der JSON auf Version 8 ohne Fehlerbericht; Restore-Jobs (groß und klein) nach CR-006 und CR-012 in `restore/offen/` ansehen, bevor ein Restore-Worker startet; `test-restore` legt einen Test-Job an; Auswertung je Clip mit einem Teilbericht und einem Report von Hand (vollständiger und unvollständiger Clip); QC-Jobs mit `schema_version` 6 laufen durch; Meldung „anderer Job“ und Sperre von `delete-folder` mit `job_ids` | |
+| 4 | Marathon-Adapter 1.3.0 (Referenzkopie) | CR-014 (Adapter-Teil) | `marathon/marathon_adapter.py`; `marathon/qc_marathon.py` nur zum Prüfen | Schritt 3 | `report_items` lokal geprüft (Dateiname, Inhalt, Fehlerfälle); QC Marathon läuft unverändert | |
+| 5 | Restore-Worker 0.3.0 in Betrieb | CR-013, CR-014 (Worker-Teil) | `restorer/`, `marathon/restore_marathon.py`, `marathon/marathon_adapter.py` 1.3.0; `marathon/cred.env` | Schritte 3 und 4 | EXE gebaut, `max_ark_queue = 1`; erster Lauf mit einem Restore-Worker, `[limits] restore = 1` und `test-restore`; Teilbericht je Clip, Marathon übernimmt vollständige Clips schon während des Jobs und löscht unvollständige; zweiter Ark-Job auf demselben Band wartet; bei zu wenig Platz wartet der Worker; Neustart des Workers während eines laufenden Ark-Jobs übernimmt ihn ohne zweiten Ark-Job; danach `[limits] restore = 2` | |
+| 6 | Abschluss dieser Datei | Regel 4 | `INTERFACES.md` | Schritte 1 bis 5 | Abschnitt 3 nachgezogen: 2. Worker-Name und Pfade (relativ oder vollständig), 3.1 ein Restore-Ausgang, 3.3 Restore-Felder, 3.4 Restore-Ergebnis, 3.5 Report-Feld `items` und Teilberichte, 3.6 Auswertung je Clip, 3.7 `job_ids`, 3.9 Adapter-Schnittstelle 1.3.0 (inkl. `share_path` nach CR-001 und `report_items`), 3.10 Restore-Worker; CR-001 und CR-006 bis CR-014 auf `erledigt`; Abschnitt 1 und 5 aktualisiert | |
 
-Nicht Teil der Umstellung: CR-001 kommt mit Schritt 1 in den Adapter; die neue `share_path`-Regel gilt damit für alle Worker, `new_master` wird erst mit dem Transcode-Worker genutzt; CR-005 und CR-004 sind unabhängig und nur der Einfachheit halber bei Schritt 2 bzw. 3 genannt.
+Nicht Teil der Umstellung: CR-001 kommt mit Schritt 1 in den Adapter; die neue `share_path`-Regel gilt damit für alle Worker, `new_master` wird erst mit dem Transcode-Worker genutzt; CR-005 und CR-004 sind unabhängig und nur der Einfachheit halber bei Schritt 2 bzw. 3 genannt. Das Transfer-Script ändert nur Marathons eigene JSON, nicht die Schnittstelle.
