@@ -1,6 +1,6 @@
 # Marathon – Schnittstellenprotokoll
 
-Stand: 2026-10-14 · gültig für die Versionen in Abschnitt 1
+Stand: 2026-10-15 · gültig für die Versionen in Abschnitt 1
 
 Dieses Protokoll beschreibt alles, was zwischen Marathon und den Workern ausgetauscht wird. Es ersetzt das Hochladen der gesamten Codebase: Jeder Thread erhält diese Datei und nur den Code, der bearbeitet wird.
 
@@ -22,10 +22,10 @@ Dieses Protokoll beschreibt alles, was zwischen Marathon und den Workern ausgeta
 | Komponente | Version | Dateien |
 |---|---|---|
 | Marathon | 1.16.0 | `marathon.py`, `core/` |
-| Marathon-Adapter (gemeinsamer Teil aller Worker-Adapter) | 1.2.0 (Referenzkopie in AQC; QC Marathon 2.2.0 enthält noch 1.1.1, ES-Restore noch keine Kopie) | `marathon/marathon_adapter.py` |
-| QC Marathon (QC-Adapter) | 2.2.0 | `marathon/qc_marathon.py`, `marathon/configs/` |
+| Marathon-Adapter (gemeinsamer Teil aller Worker-Adapter) | 1.2.0 (Referenzkopie in AQC, enthalten in QC Marathon 2.2.1; Kopie in ES-Restore) | `marathon/marathon_adapter.py` |
+| QC Marathon (QC-Adapter) | 2.2.1 | `marathon/qc_marathon.py`, `marathon/configs/` |
 | QC Worker | 2.1.0 | `qc_worker.py` |
-| AQC (Prüftools) | 0.4.0 | `aqc/`, `aqc/tools/` |
+| AQC (Prüftools) | 0.4.1 | `aqc/`, `aqc/tools/` |
 | Restore-Worker (ES-Restore) | 0.2.1 (Restorer 0.2.1, Restore Marathon 0.1.1) | `restorer/`, `marathon/restore_marathon.py`; läuft mit Marathon erst nach CR-006 bis CR-011 |
 | Transcode-Worker | nicht dokumentiert | – |
 
@@ -254,7 +254,7 @@ Vorlage:
 ### CR-005 AQC-Konsolenpfade gekürzt
 
 - Von → an: Bedienung → AQC
-- Stand: offen
+- Stand: umgesetzt in AQC 0.4.1; erledigt mit dem Build in Schritt 2
 - Inhalt: Alle Pfade in den Konsolenausgaben (`print`) von AQC werden ab einschließlich `.marathon` gekürzt, z. B. `.marathon/qc/…`. Nur Konsolenausgabe; Prüfbericht (3.12) und Schnittstelle unverändert.
 - Version: AQC 0.4.1; keine neue `schema_version`
 - Übergang: Marathon und QC Marathon unverändert
@@ -343,7 +343,7 @@ Vorlage:
 ### CR-011 Worker-Name je Rechner und Stufe
 
 - Von → an: Restore-Worker (ES-Restore) → Marathon-Adapter
-- Stand: umgesetzt in Marathon-Adapter 1.2.0
+- Stand: umgesetzt in Marathon-Adapter 1.2.0 und QC Marathon 2.2.1 (README)
 - Inhalt: Worker-Name (2.) = `<Rechnername>-<stage>`, z. B. `PC-MAM-01-Restore`, `PC-MAM-01-QC`; Zeichenersetzung wie bisher. Er bleibt Name der Heartbeat-Datei (3.7) und des Ordners unter `laufend/` (3.1); `host` im Heartbeat bleibt der Rechnername. Je Rechner läuft je Stufe ein Worker; die Eindeutigkeitsprüfung (3.9) gilt damit je Rechner und Stufe. Marathon wertet den Namen nicht aus. `worker_name()` ist erst nach dem Start mit `run` oder `run_stream` verfügbar, vorher `RuntimeError`.
 - Version: Marathon-Adapter 1.2.0, gemeinsam mit CR-001 und CR-007 bis CR-010; keine neue `schema_version`; Marathon unverändert
 - Übergang: keiner; vor dem ersten Start mit Adapter 1.2.0 alte Heartbeat-Dateien `<work_dir>/worker/<Rechnername>.json` und Ordner `<work_dir>/<stufe>/laufend/<Rechnername>/` von Hand löschen, sonst führt Marathon sie weiter als Worker ohne Lebenszeichen. QC Marathon braucht nur die neue Adapter-Kopie; seine README („Der Worker heißt wie der Rechner“) anpassen.
@@ -365,6 +365,7 @@ Vorlage:
 
 | Datum | Antrag | Änderung |
 |---|---|---|
+| 2026-10-15 | CR-005, CR-011 | QC Marathon 2.2.1 mit Marathon-Adapter 1.2.0, Konsolenzeilen `Eingang` und `Referenzbild` ab `<work_dir>` gekürzt, README: Worker-Name `<Rechnername>-QC`, `laufend/<Rechnername>-QC/`, Heartbeat `<Rechnername>-QC.json` mit `job_ids`, `schema_version` 6. AQC 0.4.1: Pfade in allen AQC-Konsolenzeilen (direkt oder über `on_progress`) ab `.marathon` gekürzt; Prüfbericht (3.12) unverändert; Schnittstelle unverändert |
 | 2026-10-14 | CR-001, CR-007 bis CR-011 | Marathon-Adapter 1.2.0 (Referenzkopie in AQC): `share_path` nach neuer Regel (Marathon benennt Pfade, Worker benutzen sie; relativ oder vollständig), `JobReport` mit `items` und `new_master`, nur `schema_version` 6, `Settings.resume`, `run_stream`/`claim`/`report`, Heartbeat `job_ids`, mehrzeiliges `status`, Worker-Name `<Rechnername>-<stage>`; Abwärtskompatibilität gestrichen (CR-006, CR-007, CR-011, Fahrplan); Vertrag (Abschnitt 3) unverändert bis Schritt 5 |
 | 2026-10-14 | – | Restore-Worker 0.2.1: Restorer als Paket `restorer/`; Schnittstelle unverändert |
 | 2026-10-14 | – | Restore-Worker 0.2.0: Speicherplatz je Ark-Job vor dem Senden, Benachrichtigungen bei jeder Abfrage; Schnittstelle unverändert |
@@ -387,7 +388,7 @@ Alle offenen Anträge außer CR-001 (Transcode) dienen dieser Umstellung. Reihen
 | Schritt | Komponente, neue Version | Anträge | Dateien | Voraussetzung | Prüfung | Erledigt |
 |---|---|---|---|---|---|---|
 | 1 | Marathon-Adapter 1.2.0 (Referenzkopie) | CR-001, CR-007, CR-008, CR-009 (Adapter-Teil), CR-010, CR-011 | `marathon/marathon_adapter.py`; `marathon/qc_marathon.py` nur zum Prüfen | – | QC Marathon läuft unverändert mit `run` und `resume=False` auf Jobs mit `schema_version` 6, Jobs mit 5 werden `failed`; Worker-Name `<Rechnername>-QC`; `run_stream`, `claim`, `report` mit `items`, `resume`, `job_ids` und mehrzeiliges `status` lokal geprüft | 2026-10-14, Marathon-Adapter 1.2.0 (lokal geprüft mit Platzhaltern für `qc_worker`, `restorer` und `toolbox`; QC Marathon 2.2.0 und Restore Marathon 0.1.1 unverändert) |
-| 2 | QC Marathon 2.2.1 (Kopie des Adapters 1.2.0, README zum Worker-Namen); optional AQC 0.4.1 | CR-011 (Betrieb), optional CR-005 | `marathon/qc_marathon.py`, `marathon/marathon_adapter.py` 1.2.0, `README.md`; bei CR-005 `aqc/` | Schritt 1 | Neue EXE gebaut; je Rechner vor dem ersten Start alte Datei `<work_dir>/worker/<Rechnername>.json` und Ordner `<work_dir>/qc/laufend/<Rechnername>/` löschen, neue EXE starten; Heartbeat `<Rechnername>-QC.json` erscheint. QC-Jobs laufen erst mit Marathon 1.17.0 (Schritt 3) | |
+| 2 | QC Marathon 2.2.1 (Kopie des Adapters 1.2.0, README zum Worker-Namen); optional AQC 0.4.1 | CR-011 (Betrieb), optional CR-005 | `marathon/qc_marathon.py`, `marathon/marathon_adapter.py` 1.2.0, `README.md`; bei CR-005 `aqc/` | Schritt 1 | Neue EXE gebaut; je Rechner vor dem ersten Start alte Datei `<work_dir>/worker/<Rechnername>.json` und Ordner `<work_dir>/qc/laufend/<Rechnername>/` löschen, neue EXE starten; Heartbeat `<Rechnername>-QC.json` erscheint. QC-Jobs laufen erst mit Marathon 1.17.0 (Schritt 3) | Code 2026-10-15 (QC Marathon 2.2.1, AQC 0.4.1); Build und Start offen |
 | 3 | Marathon 1.17.0 | CR-006, CR-009 (Marathon-Teil), CR-012, optional CR-004 | `marathon.py`, `core/` (mindestens `jobs.py`, `workers.py`, `cleanup.py`, `config.py`), `res/config.ini` | Schritt 2 (Marathon schreibt dann `schema_version` 6 für alle Stufen); vor dem Start keine Jobs mit `schema_version` 5 in `*/offen/` oder `*/laufend/` (von Hand löschen) | Im Thread zu klären: Quelle von `file`, `tape` und `size` je Datei, Form der `job_id` für Sammeljobs. Prüfen: Restore-Jobs mit `items` nach CR-006 und CR-012 (vor dem Start eines Restore-Workers in `restore/offen/` ansehen); Auswertung je Clip mit einem Report von Hand (vollständiger und unvollständiger Clip); QC-Jobs mit `schema_version` 6 laufen durch; Meldung „anderer Job“ und Sperre von `delete-folder` mit `job_ids` | |
 | 4 | ES-Restore 0.2.1 / Restore Marathon 0.1.1 in Betrieb | – (Seite bereits umgesetzt) | `marathon/marathon_adapter.py` 1.2.0 nach ES-Restore kopieren; `marathon/cred.env` | Schritt 3 | EXE gebaut; erster Lauf mit kleinem `max_job_files` (z. B. 2) und einem Restore-Worker; Report `items` je Datei, Marathon übernimmt vollständige Clips nach Transcode und löscht unvollständige; Neustart des Workers während eines laufenden Ark-Jobs übernimmt ihn ohne zweiten Ark-Job; danach `max_job_files` erhöhen | |
 | 5 | Abschluss dieser Datei | Regel 4 | `INTERFACES.md` | Schritte 1 bis 4 | Abschnitt 3 nachgezogen: 2. Worker-Name und Pfade (relativ oder vollständig), 3.3 Restore-Felder, 3.4 Restore-Ergebnis, 3.5 Report-Feld `items`, 3.6 Auswertung je Clip, 3.7 `job_ids`, 3.9 Adapter-Schnittstelle 1.2.0 (inkl. `share_path` nach CR-001), 3.10 Restore-Worker; CR-001 und CR-006 bis CR-012 auf `erledigt`; Abschnitt 1 und 5 aktualisiert | |
