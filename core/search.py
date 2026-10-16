@@ -55,10 +55,10 @@ def _master(raw) -> tuple[dict | None, str | None]:
     """Master file {file, flow_hash, size, tapes} of one EditShare file object, or the reason why it is unusable."""
     if not isinstance(raw, dict):
         return None, f"Dateiobjekt ist kein Objekt: {str(raw)[:80]!r}"
-    stem, suffix = (str(raw.get(key) or "").strip() for key in ("display_name", "display_fileext"))
+    stem, suffix = str(raw.get("display_name") or ""), str(raw.get("display_fileext") or "").strip()
     info = raw.get("file") if isinstance(raw.get("file"), dict) else {}
     name, flow_hash, size, tapes = f"{stem}.{suffix}", info.get("hash"), info.get("filesize"), _tapes(raw)
-    if not stem or not suffix:
+    if not stem.strip() or not suffix:  # The stem stays as it is: real file names may end with a space.
         return None, f"display_name/display_fileext fehlt (display_name={stem!r}, display_fileext={suffix!r})"
     if any(char in invalid_path_chars for char in name):
         return None, f"{name}: unzulässige Zeichen im Dateinamen"
