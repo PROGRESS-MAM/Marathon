@@ -2,7 +2,8 @@
 
 Marathon lays out test jobs into the normal job pools, follows them and collects their reports, but never evaluates
 them: marathon.json is only read, worker results stay in <work_dir>/test/<stage>/ausgang/<job_id>, nothing is moved on,
-retried or deleted. Job file and report are archived like in production. Production cycles skip all test job ids.
+retried or deleted. Job file, report and partial reports are archived like in production. Production cycles skip all
+test job ids. Restore test results are checked per clip for the test report only.
 """
 # --------- IMPORTS ---------
 import json
@@ -12,18 +13,19 @@ from pathlib import Path
 
 from . import app_name, app_version
 from .constants import (
-    limit_keys, missing_job_grace, outbox, stage_labels, stages, test_box, test_entry_keys, test_protected, test_qc_file,
-    test_qc_sections)
+    limit_keys, missing_job_grace, outbox, restore_kinds, stage_labels, stages, test_box, test_entry_keys, test_protected,
+    test_qc_file, test_qc_sections)
 from .config import cfg, error_dir, reports_dir, res_dir, state_path, test_state_path
 from .console import log
 from .util import age, clip_text, context, file_stamp, format_errors, issue, now, stamp, write_new
 from .layout import check_root, job_folder, load_mapping, qc_inbox, share_path
-from .share import delete_job_file, ensure_folders, listing, move, rmdir, running, scan, write_text_atomic
+from .share import archive_job, delete_job_file, ensure_folders, listing, move, rmdir, running, scan, write_text_atomic
 from .priority import priority
 from .state import load_state, save_state
 from .ffe import sync_references
 from .audit import report_problem
-from .jobs import archive_job, job_payload
+from .jobs import job_payload
+from . import restore
 from .details import block, clock, head, qc_findings, qc_rows
 
 
@@ -59,17 +61,6 @@ def _progress(run: dict) -> str:
     return f"{sum(counts.values())}/{len(run['cases'])} fertig" + (f" ({details})" if details else "")
 
 
-def test_status() -> str:
-    """Short status of the last test run for the console."""
-    try:
-        run = _load()["run"]
-    except (OSError, UnicodeError, ValueError) as exc:
-        return f"Teststand nicht lesbar: {exc}"
-    if not run:
-        return "kein Test-Lauf"
-    return f"Test-Lauf {run['id']} {'abgeschlossen' if run['finished_at'] else 'offen'}: {_progress(run)}"
-
-
 def _note(run: dict, text: str) -> None:
     """Log a note once per test run and keep it for the test report."""
     if text not in run["notes"]:
@@ -89,6 +80,8 @@ def _source_problem(stage: str, fields: dict, clip: dict | None) -> str | None:
         return "Veritone-ID fehlt; \"proxy_name\" in \"fields\" angeben"
     if stage == "qc" and "input" not in fields and not clip["files"]["proxy"]:
         return "kein Proxy; \"input\" in \"fields\" angeben"
+    if stage == "restore" and "items" not in fields and not clip["masters"]:
+        return "keine Dateien (masters leer); \"items\" in \"fields\" angeben"
     return None
 
 
@@ -114,7 +107,7 @@ def _case(number: int, entry, labels: dict[str, str], clips: dict) -> dict:
     if problem := _source_problem(stage, fields, clips.get(clip_id)):
         raise ValueError(f"clip_id {clip_id}: {problem}")
     return {"number": number, "name": (name or f"{stage_labels[stage]} {clip_id}").strip(), "stage": stage,
-            "clip_id": clip_id, "fields": fields, "job": None, "job_count": 0, "result": None}
+            "clip_id": clip_id, "clip_ids": [clip_id], "fields": fields, "job": None, "job_count": 0, "result": None}
 
 
 def _read_cases(clips: dict, path: Path) -> list[dict]:
@@ -144,11 +137,27 @@ def _close(case: dict, status: str, text: str) -> None:
                       "worker": (case["job"] or {}).get("worker"), "at": now(), "report": None}
 
 
+def _restore_results(job: dict, report: dict) -> list[dict]:
+    """Complete or incomplete per clip of a restore test job, with reasons; only reads the test output."""
+    if not restore.valid_items(job.get("items")):
+        return [{"clip_id": "–", "clip_name": "", "status": "unvollständig", "reasons": ["items im Job ungültig (Testliste)"]}]
+    entries = restore.report_entries(report.get("items"))
+    missing = "items fehlt oder ungültig im Report" if entries is None else "kein Eintrag im Report"
+    results = []
+    for clip_id, clip_name in dict.fromkeys((item["clip_id"], item["clip_name"]) for item in job["items"]):
+        _, reasons = restore.clip_check(job, clip_id, entries or {}, missing)
+        results.append({"clip_id": clip_id, "clip_name": clip_name, "status": "unvollständig" if reasons else "vollständig",
+                        "reasons": reasons})
+    return results
+
+
 def _record(case: dict, report: dict, worker: str | None) -> None:
     result = str(report.get("result") or "").strip()
     case["job"].update(state="fertig", worker=worker)
     case["result"] = {"status": report["status"], "result": result, "preset": report.get("preset"),
                       "new_master": report.get("new_master"), "worker": worker, "at": now(), "report": report}
+    if case["stage"] == "restore":
+        case["result"]["clips"] = _restore_results(case["job"], report)
     log(f"Test {case['number']} ({case['name']}): {report['status']}" + (f" – {result}" if result else "") +
         f"; Ergebnis bleibt in {case['job']['output_folder']}")
 
@@ -156,11 +165,18 @@ def _record(case: dict, report: dict, worker: str | None) -> None:
 def _collect(run: dict, folder: str, known: set[str]) -> None:
     """Take over reports of test jobs; reports without an open test job are archived without evaluation."""
     cases = {case["job"]["id"]: case for case in run["cases"] if case["job"] and not case["result"]}
-    for name, _ in sorted(scan(f"{folder}/fertig").values()):
-        job_id = Path(name).stem
-        if not name.casefold().endswith(".json") or job_id.casefold() not in known:
-            continue  # Production reports wait for the job loop.
+    files = []
+    for name, _ in scan(f"{folder}/fertig").values():
+        job_id, partial = restore.split_name(name)
+        if name.casefold().endswith(".json") and job_id.casefold() in known:  # Production reports wait for the job loop.
+            files.append((not partial, name, job_id))
+    for report_file, name, job_id in sorted(files):
         relative = f"{folder}/fertig/{name}"
+        if not report_file:  # Partial report of a restore test job: archived, not evaluated.
+            move(relative, f"{folder}/archiv", f"{Path(name).stem}.report.json")
+            if case := cases.get(job_id):
+                case["job"]["partials"] = case["job"].get("partials", 0) + 1
+            continue
         try:
             report = json.loads(share_path(relative).read_text(encoding="utf-8"))
         except (OSError, UnicodeError, ValueError) as exc:
@@ -203,32 +219,42 @@ def _locate(run: dict, case: dict, ctx: dict) -> None:
         case["job"] = None
 
 
-def _create_job(data: dict, run: dict, case: dict, clip: dict | None) -> None:
-    stage, folder = case["stage"], job_folder(case["stage"])
+def _create_job(data: dict, run: dict, case: dict, clips: dict) -> None:
+    stage, folder, clip = case["stage"], job_folder(case["stage"]), clips.get(case["clip_id"])
     if problem := _source_problem(stage, case["fields"], clip):
         _close(case, "nicht ausgelegt", f"clip_id {case['clip_id']}: {problem}")
         log(f"Test {case['number']} ({case['name']}) nicht ausgelegt: {case['result']['result']}")
         return
     case["job_count"] += 1
-    job_id = f"{stamp()}__{clip['clip_id']}__{stage_labels[stage].casefold()}{case['job_count']}"
-    output = f"{cfg['work_dir']}/{test_box}/{stage}/{outbox}/{job_id}"
     marker = {"run": run["id"], "number": case["number"], "name": case["name"]}
-    payload = job_payload(clip, stage, job_id, f"{folder}/fertig", output, {**case["fields"], "test": marker})
+    if stage == "restore":
+        job_id = f"{stamp()}__test{case['number']}-{case['job_count']}_restore"
+        output = f"{cfg['work_dir']}/{test_box}/{stage}/{outbox}/{job_id}"
+        counts = restore.tape_counts(restore.waiting_clips(clips.values()))
+        items = None if "items" in case["fields"] else restore.job_items([clip], counts)
+        payload = restore.job_payload(job_id, f"{folder}/fertig", output, items) | case["fields"] | {"test": marker}
+    else:
+        job_id = f"{stamp()}__{clip['clip_id']}__{stage_labels[stage].casefold()}{case['job_count']}"
+        output = f"{cfg['work_dir']}/{test_box}/{stage}/{outbox}/{job_id}"
+        payload = job_payload(clip, stage, job_id, f"{folder}/fertig", output, {**case["fields"], "test": marker})
     data["job_ids"].append(job_id)
     share_path(output).mkdir(parents=True, exist_ok=True)
     write_text_atomic(share_path(f"{folder}/offen/{job_id}.json"), json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
     case["job"] = {"id": job_id, "folder": folder, "file": f"{job_id}.json", "output_folder": output, "state": "offen",
                    "worker": None, "created_at": payload["created_at"], "running_since": None, "missing_since": None}
+    if stage == "restore":
+        case["job"]["items"] = payload.get("items")
     log(f"Test-Job erstellt: {job_id} (Test {case['number']}: {case['name']})")
 
 
 def _schedule(data: dict, run: dict, clips: dict) -> None:
-    """Lay out test jobs in list order, at most [limits] open test jobs per stage."""
+    """Lay out test jobs in list order, at most [limits] open test jobs per stage (Restore: big + small jobs)."""
     for stage in stages:
         cases = [case for case in run["cases"] if case["stage"] == stage and not case["result"]]
         pending = sum(1 for case in cases if case["job"] and case["job"]["state"] == "offen")
-        for case in [case for case in cases if not case["job"]][:max(0, cfg[limit_keys[stage]] - pending)]:
-            _create_job(data, run, case, clips.get(case["clip_id"]))
+        limit = sum(cfg[key] for key in restore_kinds.values()) if stage == "restore" else cfg[limit_keys[stage]]
+        for case in [case for case in cases if not case["job"]][:max(0, limit - pending)]:
+            _create_job(data, run, case, clips)
 
 
 def _production_jobs(data: dict) -> int:
@@ -261,11 +287,14 @@ def _summary(run: dict, when: datetime) -> str:
     lines = head(f"{app_name} {app_version} · Test-Lauf {run['id']}", [row for row in rows if row[1] is not None])
     for case, result in zip(cases, results):
         job = case["job"] or {}
-        facts = [("clip_id", case["clip_id"]), ("Stufe", None if stage else stage_labels[case["stage"]]),
+        ids = case.get("clip_ids") or [case["clip_id"]]
+        facts = [("clip_id", ids[0] if len(ids) == 1 else f"{len(ids)} Clips"), ("Stufe", None if stage else stage_labels[case["stage"]]),
                  ("Preset", None if preset else result.get("preset")), ("Worker", result.get("worker"))]
         rows = [("Job", job.get("id")), ("Ausgang", None if outputs else job.get("output_folder")), ("Ergebnis", result.get("result"))]
         if result.get("status") == "rejected" and case["stage"] == "qc":
             rows += qc_rows(qc_findings(job.get("output_folder")))
+        rows += [("Clip", f"{item['clip_id']} {item['clip_name']}: {item['status']}" +
+                  (f" – {'; '.join(item['reasons'])}" if item["reasons"] else "")) for item in result.get("clips") or []]
         lines += block(case["number"], result.get("status") or "offen", case["name"], facts, rows)
     if run["notes"]:
         lines += [f"Hinweise: {len(run['notes'])}", *(f"  {note}" for note in run["notes"])]
@@ -323,6 +352,29 @@ def start_qc_test() -> None:
     start_test(test_qc_file)
 
 
+def start_restore_test() -> None:
+    """Start a test run with exactly one restore test job, clips chosen like a small job; refused while a test run is open."""
+    check_root()
+    data = _load()
+    if run := _open_run(data):
+        raise RuntimeError(f"Test-Lauf {run['id']} ist offen ({_progress(run)}); kein Restore-Test. "
+                           f"'test' setzt ihn fort, 'test-cancel' beendet ihn.")
+    if not state_path.exists():
+        raise RuntimeError("Noch keine JSON – keine Clips für den Restore-Test (zuerst 'update-index' oder 'run').")
+    mapping, state = load_mapping(), load_state()
+    ranks = {name: rank for rank, name in enumerate(priority(mapping, state, context())["restore"])}
+    locked = {record["tape"].casefold() for record in state["restore"]["jobs"].values()}
+    planned = restore.plan_jobs(restore.waiting_clips(state["clips"].values()), ranks, locked, {"gross": 0, "klein": 1},
+                                cfg["small_job_clips"])
+    if not planned:
+        raise RuntimeError("Kein wartender Restore-Clip auf einem freien Band; kein Test-Lauf gestartet.")
+    _, tape, clips, items = planned[0]
+    case = {"number": 1, "name": f"Restore-Test Band {tape} ({len(clips)} Clips)", "stage": "restore",
+            "clip_id": clips[0]["clip_id"], "clip_ids": [clip["clip_id"] for clip in clips], "fields": {"items": items},
+            "job": None, "job_count": 0, "result": None}
+    _begin(data, "test-restore (aus der JSON)", [case])
+
+
 def start_test(test_file: str | None = None) -> None:
     """Start a new test run from the test list (default [test] test_file), or resume the unfinished one."""
     check_root()
@@ -333,7 +385,10 @@ def start_test(test_file: str | None = None) -> None:
     if not state_path.exists():
         raise RuntimeError("Noch keine JSON – Test-Jobs brauchen die Clips aus marathon.json (zuerst 'update-index' oder 'run').")
     test_file = test_file or cfg["test_file"]
-    cases = _read_cases(load_state()["clips"], res_dir / test_file)
+    _begin(data, test_file, _read_cases(load_state()["clips"], res_dir / test_file))
+
+
+def _begin(data: dict, test_file: str, cases: list[dict]) -> None:
     data["run"] = {"id": stamp(), "test_file": test_file, "started_at": now(), "finished_at": None, "report": None,
                    "notes": [], "cases": cases}
     save_state(data, test_state_path)

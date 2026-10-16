@@ -1,6 +1,6 @@
 # Marathon
 
-Marathon baut aus EditShare-Suche und Veritone einen Clip-Index (JSON), legt Restore-, Transcode- und QC-Jobs nach Prioliste für die Worker aus und erstellt Berichte. Zusätzlich markiert Marathon Clips, die die FFE-Filmtafel benötigen, stellt den Workern die Referenzdateien bereit und übernimmt auf Befehl vorhandene Master (`ingest-master`) und vorhandene Proxys (`ingest-proxy`). Im Test-Modus (`test`) laufen Test-Jobs durch die Worker, ohne den Produktionsstand zu ändern.
+Marathon baut aus EditShare-Suche und Veritone einen Clip-Index (JSON), legt Restore-Sammeljobs je Band sowie Transcode- und QC-Jobs nach Prioliste für die Worker aus und erstellt Berichte. Zusätzlich markiert Marathon Clips, die die FFE-Filmtafel benötigen, stellt den Workern die Referenzdateien bereit und übernimmt auf Befehl vorhandene Master (`ingest-master`) und vorhandene Proxys (`ingest-proxy`). Im Test-Modus (`test`) laufen Test-Jobs durch die Worker, ohne den Produktionsstand zu ändern.
 
 ## Installation
 
@@ -17,6 +17,7 @@ Projektordner:
 ~~~text
 marathon.py                            Startdatei
 core/                                  Programmteile von Marathon
+tools/transfer_json_v8.py              Einmalige Übertragung der JSON von Version 7 auf 8 (Update auf 1.17.0)
 res/
   config.ini                           Konfiguration (siehe unten)
   cred.env                             FLOW_HOST, FLOW_USER, FLOW_PASSWORD (Suche, EditShare-Feld) und vt_api_token=<Token>
@@ -30,9 +31,41 @@ res/
     *.mov                              alle FFE-Filmtafel-Clips, z. B. 2K_2_35.mov
 ~~~
 
-`marathon.py` und `core/` gehören immer zusammen: Bei einem Update beide vollständig ersetzen; `res/`, `log/`, `state/`, `reports/` und `test/` bleiben unverändert.
+`marathon.py`, `core/` und `tools/` gehören immer zusammen: Bei einem Update alle vollständig ersetzen; `res/`, `log/`, `state/`, `reports/` und `test/` bleiben unverändert.
 
-`log/`, `state/`, `reports/`, `reports/errors/` und `test/` legt Marathon selbst an. Der Index liegt in `state/marathon.json` (JSON-Version 7), das Job-Protokoll für die Detailberichte in `state/journal_<stufe>.jsonl`, der Stand des Test-Modus in `test/test.json`.
+`log/`, `state/`, `reports/`, `reports/errors/` und `test/` legt Marathon selbst an. Der Index liegt in `state/marathon.json` (JSON-Version 8), das Job-Protokoll für die Detailberichte in `state/journal_<stufe>.jsonl`, der Stand des Test-Modus in `test/test.json`.
+
+## Update auf 1.17.0 (JSON 7 → 8)
+
+Marathon 1.17.0 lädt nur JSON-Version 8 und bricht bei Version 7 mit einem Hinweis auf das Transfer-Script ab. Ablauf:
+
+1. Marathon mit `quit` beenden; alle Worker beenden.
+2. Alle Jobs in `<work_dir>/*/offen/` und `<work_dir>/*/laufend/` von Hand löschen (Jobs mit `schema_version` 5).
+3. `marathon.py`, `core/` und `tools/` ersetzen; `res/config.ini` anpassen (`[limits] restore_big_job`, `restore_small_job`, `[restore] small_job_clips`, `[limits] restore` entfernen).
+4. Transfer im Marathon-Ordner starten:
+
+~~~bash
+python tools/transfer_json_v8.py
+~~~
+
+Das Script nutzt Config, Zugang und Suche von Marathon und fragt EditShare selbst ab. Es prüft zuerst alles, ändert erst danach etwas und schreibt die JSON zuletzt:
+
+| Prüfung | Abbruch, wenn |
+| --- | --- |
+| JSON | `state/marathon.json` nicht Version 7 |
+| Sperre | Marathon läuft (`state/marathon.lock`) |
+| Jobs | eine Job-Datei in `<work_dir>/*/offen/` oder `<work_dir>/*/laufend/` liegt |
+| Ordner | ein Restore-Ordner je Kollektion (`<Ziel>/<work_dir>[/<Kollektion>]/restore/` samt `ausgang/`, `archiv/`) eine Datei enthält, auch versteckte, System- oder 0-Byte-Dateien |
+| EditShare | ein Clip der JSON nicht gefunden wird, seine Dateien unvollständig oder widersprüchlich sind oder die Dateinamen von `master_files` abweichen |
+
+Ohne Fehler:
+
+- Sicherung `state/backup/marathon.v7_<stempel>.json`,
+- `<work_dir>/restore/ausgang/` anlegen, leere Restore-Ordner je Kollektion entfernen (es wird nie eine Datei gelöscht),
+- JSON 8 schreiben: je Clip `masters`, `master_files`, `lto_tapes`, `master_size` neu aus EditShare, `filehashes` entfernt, `job` auf `null`; Status, Aktiv-Flag, Versuche und Historie bleiben,
+- Bericht `reports/transfer_<stempel>.txt` mit Zahlen und übernommenen Abweichungen bei Bändern und Größen.
+
+Bei einem Fehler bleibt die JSON Version 7; der Fehlerbericht `reports/errors/transfer_<stempel>_errors.txt` nennt alle Gründe, bei Ordnern jeden betroffenen Ordner mit seinen Dateien. Scheitert das Entfernen eines Ordners trotz Prüfung, nennt er die bereits entfernten leeren Ordner.
 
 ## Start
 
@@ -52,6 +85,7 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 | `stop` | Job-Schleife bzw. Test-Modus anhalten |
 | `test` | Test-Modus: Test-Lauf aus der Testliste starten oder offenen Test-Lauf fortsetzen; hält die Job-Schleife an (siehe Test-Modus) |
 | `test-qc` | QC-Testliste aus der JSON erzeugen (alle Clips mit vorhandenem Proxy im QC-Eingang) und Test-Lauf starten (siehe Test-Modus) |
+| `test-restore` | Test-Lauf mit genau einem Restore-Test-Job starten; Clips nach der Regel des kleinen Jobs (siehe Test-Modus) |
 | `test-cancel` | Offenen Test-Lauf beenden: nicht übernommene Test-Jobs zurückziehen, Testbericht schreiben |
 | `auto-report` | Täglichen Auto-Bericht einschalten (ab `auto_report_time`); danach je Stufe ein Detailbericht |
 | `auto-report-off` | Täglichen Auto-Bericht ausschalten |
@@ -64,8 +98,8 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 | `retry-restore` | Alle inaktiven Clips der Stufe Restore wieder freigeben (siehe Wieder freigeben) |
 | `retry-transcode` | Alle inaktiven Clips der Stufe Transcode wieder freigeben (siehe Wieder freigeben) |
 | `retry-qc` | Alle inaktiven Clips der Stufe QC wieder freigeben (siehe Wieder freigeben) |
-| `delete-folder` | SMB-Arbeitsordner bereinigen; Index bleibt, Prozesszustand wird neu aufgebaut. Bei Clip-/Mediendateien Bestätigung mit `loeschen`; gesperrt bei offenem Test-Lauf |
-| `status` | Anzeigen, was eingeschaltet ist, und Stand des Test-Laufs |
+| `delete-folder` | SMB-Arbeitsordner bereinigen; Index bleibt, Prozesszustand wird neu aufgebaut (Restore-Jobs entfallen). Bei Clip-/Mediendateien Bestätigung mit `loeschen`; gesperrt bei offenem Test-Lauf, frischem Heartbeat, Heartbeat mit `job_id`/`job_ids` oder Jobs ohne Report in `laufend/` |
+| `status` | Anzeigen, was eingeschaltet ist (Job-Schleife, Test-Modus, Auto-Bericht) |
 | `help` | Befehlsübersicht |
 | `quit` | Marathon beenden |
 
@@ -84,13 +118,49 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 - Clips in der JSON: Fehlende Felder und eine leere Veritone-ID werden aus der Suche ergänzt (History `Fehlende Felder ergänzt`). Vorhandene Werte bleiben; Abweichungen stehen nur in der Index-Fehlerliste.
 - Clips in der JSON, die die Suche (EditShare ∩ Veritone) nicht mehr findet: Der Clip wird inaktiv (`Nicht mehr im Index`), bleibt in seiner Stufe und zählt weiter in Gesamt. Eintrag in der Index-Fehlerliste; der Bericht zeigt die Anzahl in der Zeile `Nicht mehr im Index`. Bereite Clips bleiben aktiv und werden nur gemeldet; ein bereits inaktiver Clip behält seinen bisherigen Grund.
 - Ein später wieder gefundener Clip bleibt inaktiv, bis er mit `retry-<stufe>` freigegeben wird.
+- Dateien je Clip: aus `video.file`, `audio.file` und `data.file`. Je Datei Name = `display_name` + „.“ + `display_fileext`, Hash = `file.hash` (Form `2:<hex>`), Größe = `file.filesize`, Bänder = alle `backup_locations[].tapes`. Dateien mit gleichem Hash werden zusammengefasst. Am Clip stehen sie in `masters` (`file`, `flow_hash`, `size`, `tapes`, sortiert nach Name), daraus `master_files`, `lto_tapes` und `master_size` (Summe aller Dateien).
+- Fehlt bei einer Datei Name, Endung, Hash, Größe oder Band, ist ein Name unzulässig (`<>:"/\|?*` oder Steuerzeichen), hat ein Hash mehrere Namen oder Größen oder ein Name mehrere Hashes, wird ein neuer Clip, der einen Restore braucht, nicht aufgenommen (Index-Fehlerliste: „Dateien in EditShare unvollständig oder widersprüchlich“). Bei Clips in der JSON stehen geänderte Dateien nur unter „Metadaten in der Suche geändert“.
 - Nur `update-index` sucht. `run` führt `update-index` nur aus, wenn noch keine JSON existiert; Job-Schleife und Berichte suchen nie.
 
 ## Prioliste und Jobs
 
 - `res/priority.txt`: je Abschnitt `[Restore]`, `[Transcode]`, `[QC]` eine Kollektion pro Zeile, oben = höchste Priorität. Nicht aufgeführte Kollektionen folgen in der Reihenfolge von `collections.json`.
-- Marathon liest die Prioliste in jedem Job-Zyklus und legt pro Stufe höchstens so viele Jobs nach `<work_dir>/<stufe>/offen`, wie `[limits]` erlaubt (gezählt werden offene Jobs).
+- Marathon liest die Prioliste in jedem Job-Zyklus und legt für Transcode und QC höchstens so viele Jobs nach `<work_dir>/<stufe>/offen`, wie `[limits]` erlaubt (gezählt werden offene Jobs).
 - Worker nehmen den ersten Job in `offen` (nach Dateiname = Erstellreihenfolge). Eine geänderte Prioliste wirkt auf neu ausgelegte Jobs.
+
+### Restore-Sammeljobs
+
+Ein Restore-Job enthält die Dateien mehrerer Clips, zusammengefasst nach Band.
+
+- **Wartender Clip:** aktiv, nicht bereit, Stufe Restore, ohne Job. Ein Clip steht nie in zwei Jobs.
+- **Hauptband** je Clip: ein Band, auf dem jede Datei des Clips eine Kopie hat; bei mehreren das mit den meisten wartenden Clips, dann nach Name. Gibt es keines, das Band mit den meisten Dateien des Clips; jede übrige Datei wird von ihrem Band mit den meisten wartenden Clips gelesen. „Wartende Clips eines Bands“ = wartende Clips mit mindestens einer Datei auf dem Band.
+- **Gesperrt** sind die Hauptbänder aller offenen und laufenden Restore-Jobs; Clips darauf warten.
+- **Große Jobs** (bis `[limits] restore_big_job` gleichzeitig): oberste Kollektion der Prioliste mit wartenden Clips auf freien Hauptbändern → deren Hauptband mit den meisten Clips dieser Kollektion (bei Gleichstand meiste wartende Clips insgesamt, dann Name) → alle wartenden Clips mit diesem Hauptband aus allen Kollektionen, ohne Obergrenze.
+- **Kleine Jobs** (bis `[limits] restore_small_job` gleichzeitig, nach den großen Jobs): ein freies Hauptband mit höchstens `[restore] small_job_clips` wartenden Clips; bei mehreren das mit den meisten Clips der obersten Kollektion der Prioliste, dann der nächsten usw., dann Name. Gibt es keines: die `small_job_clips` höchstpriorisierten Clips des Hauptbands, das als nächster großer Job gewählt würde; der Rest wartet.
+- Reihenfolge im Job: Clips nach Prioliste und Eingangszeit, Dateien je Clip nach Name.
+- Wird ein Clip eines offenen Jobs inaktiv oder verlässt er den Restore, zieht Marathon den ganzen Job zurück und plant im selben Zyklus neu. Läuft der Job schon, läuft er weiter; das Ergebnis dieses Clips wird verworfen und sein Clip-Ordner gelöscht.
+- Verschwindet die Job-Datei ohne Report, warten alle noch nicht ausgewerteten Clips nach 30 Minuten wieder.
+- Marathon prüft keinen Speicherplatz; Platz und Bandsperre regelt der Restore-Worker. Große Jobs dürfen `max_job_hours` überschreiten (nur Meldung im Bericht).
+
+**Job-Datei** (`<work_dir>/restore/offen/<job_id>.json`, `schema_version` 6):
+
+~~~json
+{
+  "schema_version": 6,
+  "job_id": "20261016T091446301058__1_restore",
+  "stage": "Restore",
+  "created_at": "2026-10-16T11:14:46+02:00",
+  "report_folder": ".marathon/restore/fertig",
+  "output_folder": ".marathon/restore/ausgang/20261016T091446301058__1_restore",
+  "items": [
+    { "clip_id": "641094", "clip_name": "Blick in die Welt 1962_33_HLS Video_m8324_BIDW20460.new.01.mxf",
+      "file": "Blick in dA01.5FC65FC65B66A.mxf", "flow_hash": "2:74265de8cd65de5fb3fd9f41b388372e",
+      "tape": "LS2032L8", "size": 79835745 }
+  ]
+}
+~~~
+
+`<n>` in der `job_id` ist die laufende Nummer der Restore-Jobs. Ein Restore-Ausgang für alle Kollektionen: `<work_dir>/restore/ausgang/<job_id>/<Clip-Ordner>/<Datei>`.
 
 ## FFE-Filmtafel
 
@@ -121,7 +191,7 @@ Nach Änderungen an der FFE-Liste genügt `update-ffe`. Nach `update-index` ist 
 - Marathon kopiert `res/FFE Filmerbe/FFE-Filmerbe-DEFA-Titel_Tafel.png` nach `<root_path>/<work_dir>/worker/` und spiegelt alle `.mov`-Dateien aus `res/FFE Filmerbe/` nach `<root_path>/<work_dir>/worker/FFE Filmerbe/` – bei `run`, `create-folders` und in jedem Job-Zyklus. Geänderte Dateien (Größe oder Änderungszeit) werden neu kopiert, im lokalen Ordner entfernte Clips und andere Dateien im Clip-Ordner auf dem SMB gelöscht.
 - `delete-folder` löscht die Referenzdateien mit dem Arbeitsordner, ohne Bestätigung dafür zu verlangen; `run` oder `create-folders` legen sie wieder ab.
 
-**Job-Felder (Job-`schema_version` 5), Pfade relativ zu `root_path` (Ausnahme: `inputs` von Ingest-Mastern):**
+**Job-Felder (Job-`schema_version` 6), Pfade relativ zu `root_path` (Ausnahme: `inputs` von Ingest-Mastern):**
 
 | Job | Feld | Inhalt |
 | --- | --- | --- |
@@ -135,6 +205,13 @@ Nach Änderungen an der FFE-Liste genügt `update-ffe`. Nach `update-index` ist 
 Maßgeblich ist der Wert beim Erstellen des Jobs.
 
 ## Worker-Ergebnis und Auslieferung
+
+**Restore** – Auswertung je Clip:
+
+- Teilberichte `<job_id>.teil-<stempel>.json` in `<work_dir>/restore/fertig/` wertet Marathon schon während des Jobs in Namensreihenfolge aus, den Report `<job_id>.json` zuletzt. Jeder Clip wird nur einmal ausgewertet; ein Clip, dessen Einträge ein Teilbericht nicht alle enthält, erst mit dem Report.
+- **Vollständig**: alle Einträge `restored`, `path` liegt im `output_folder` des Jobs, die Datei ist vorhanden und so groß wie `size`. Die Dateien gehen nach `…/transcode/eingang/<clip_id>/` der Kollektion, weiter an Transcode, Versuche 0.
+- **Unvollständig**: Clip-Ordner wird gelöscht, die Gründe (`reason` bzw. Marathons Prüfung) stehen in der History, im Job-Protokoll und im Detailbericht; der Clip wird inaktiv (`Job endgültig fehlgeschlagen`). Kein zweiter Versuch – wieder frei mit `retry-restore`. Fehlt `items` im Report oder ist es ungültig, gilt jeder noch nicht ausgewertete Clip als unvollständig.
+- Nach dem Report: Ausgang löschen; Job-Datei, Report (`<job_id>.report.json`) und Teilberichte (`<Name>.report.json`) liegen in `<work_dir>/restore/archiv/`.
 
 **Transcode-Ausgang** (Ordner `output_folder` des Jobs):
 
@@ -220,6 +297,7 @@ QC zusätzlich: „Nicht bestanden nach Kriterium“ – wie oft jedes Kriterium
 
 Gibt alle inaktiven Clips einer Stufe wieder frei, z. B. nach einer geänderten QC-Metrik oder nachdem eine Blockierung beseitigt wurde.
 
+- Restore hat je Clip genau einen Versuch; `retry-restore` gibt unvollständig restaurierte Clips für einen neuen Sammeljob frei.
 - Freigegeben werden alle Clips der Stufe ohne laufenden Job mit einem dieser Gründe: `QC nicht bestanden`, `Job endgültig fehlgeschlagen`, `Neuer Master blockiert`, `Auslieferung blockiert`, `Zuordnung beim Neuaufbau unklar`, `Nicht mehr im Index`.
 - Ohne Vorschau und ohne Bestätigung. Das Log zeigt die Anzahl je Kollektion und die Anzahl der Clips mit laufendem Job (übersprungen).
 - Die Versuche werden auf 0 gesetzt. Die Clips bleiben in ihrer Stufe und behalten ihre Eingangszeit; die Job-Schleife legt die Jobs wie gewohnt nach Prioliste und `[limits]` aus.
@@ -262,7 +340,7 @@ python marathon.py ingest-proxy    # oder direkt beim Start
 ~~~
 
 - Der Restore gilt als abgeschlossen: Stufe `transcode`, Versuche auf 0; ein endgültig fehlgeschlagener Job wird aufgehoben, der Clip ist wieder aktiv.
-- Ein offener Restore-Job wird zurückgezogen. Der nächste Job-Zyklus legt den Transcode-Job aus.
+- Ein offener Restore-Sammeljob wird als Ganzes zurückgezogen; seine übrigen Clips plant der nächste Job-Zyklus neu, ebenso den Transcode-Job. Läuft der Sammeljob, wird nichts eingetragen (Fehler „Job läuft“).
 - History: `Restore abgeschlossen – Master per Ingest` (mit Pfad der Masterdatei) und `Weiter an Transcode`.
 - Masterdateien im Masterordner werden nie verschoben oder gelöscht, auch nicht nach bestandenem QC. Fehlt eine eingetragene Masterdatei vor dem Transcode, wird der Clip als `Verloren – Master fehlt vor Transcode` inaktiv.
 - `delete-folder` behält eingetragene Ingest-Master, solange die Datei vorhanden ist.
@@ -321,7 +399,7 @@ Test-Jobs laufen wie Produktions-Jobs durch die Worker (Restore, Transcode, QC);
 ~~~bash
 Marathon> test           # Test-Lauf starten oder offenen Test-Lauf fortsetzen
 Marathon> test-qc        # QC-Testliste aus der JSON erzeugen und Test-Lauf starten
-Marathon> status         # Fortschritt des Test-Laufs
+Marathon> test-restore   # Test-Lauf mit einem Restore-Test-Job (Clips wie kleiner Job)
 Marathon> test-cancel    # Test-Lauf vorzeitig beenden
 python marathon.py test  # oder direkt beim Start
 python marathon.py test-qc
@@ -349,7 +427,7 @@ python marathon.py test-qc
 | `name` | nein | Bezeichnung im Testbericht (Standard `<Stufe> <clip_id>`) |
 | `fields` | nein | Job-Felder, die ersetzt oder ergänzt werden; nicht erlaubt: `schema_version`, `job_id`, `stage`, `clip_id`, `created_at`, `report_folder`, `output_folder`, `test` |
 
-- Job-Felder ohne Angabe in `fields` kommen wie im Produktionsbetrieb aus der JSON: QC `input` = aktueller Proxy des Clips (QC-Eingang oder Zielordner), Transcode `inputs` = Master des Clips und `proxy_name`, Restore `files` und `hashes`. Hat der Clip keinen Proxy bzw. Master oder keine Veritone-ID, müssen `fields` die Werte angeben.
+- Job-Felder ohne Angabe in `fields` kommen wie im Produktionsbetrieb aus der JSON: QC `input` = aktueller Proxy des Clips (QC-Eingang oder Zielordner), Transcode `inputs` = Master des Clips und `proxy_name`, Restore `items` = alle Dateien des Clips (ein Sammeljob mit einem Clip; Bänder wie im Produktionsbetrieb). Hat der Clip keinen Proxy bzw. Master oder keine Veritone-ID, müssen `fields` die Werte angeben.
 - Werte in `fields` prüft Marathon nicht; so lassen sich auch ungültige Jobs testen.
 - Ist ein Eintrag ungültig, startet kein Test-Lauf; das Protokoll nennt alle fehlerhaften Einträge.
 
@@ -362,10 +440,17 @@ python marathon.py test-qc
 - Je Clip ein Eintrag `{ "name": "<Identifier> <Titel>", "stage": "QC", "clip_id": "…" }` ohne `fields`; `input`, `ffe_tafel` und `ffe_reference_image` kommen beim Auslegen aus der JSON.
 - Ist ein Test-Lauf offen, erzeugt `test-qc` keine Liste und bricht ab (`test` setzt fort, `test-cancel` beendet). Ohne passenden Clip startet kein Test-Lauf.
 
+**Restore-Test aus der JSON (`test-restore`):**
+
+- Legt einen Test-Lauf mit genau einem Restore-Test-Job an. Die Clips wählt Marathon aus den wartenden Clips der JSON nach der Regel des kleinen Jobs; Hauptbänder offener und laufender Produktions-Jobs sind gesperrt. `state/marathon.json` bleibt unberührt.
+- `output_folder` = `<work_dir>/test/restore/ausgang/<job_id>`; das Ergebnis bleibt liegen. Job-Datei, Report und Teilberichte werden archiviert, nichts ausgewertet.
+- Der Testbericht zeigt je Clip `vollständig` oder `unvollständig` mit Gründen.
+- Ist ein Test-Lauf offen, bricht `test-restore` ab (wie `test-qc`). Ohne wartenden Clip auf einem freien Band startet kein Test-Lauf.
+
 **Ablauf:**
 
 - `test` und `test-qc` halten die Job-Schleife an und legen aus der Testliste einen Test-Lauf an. Ist noch ein Test-Lauf offen, wird er mit seiner ursprünglichen Testliste fortgesetzt.
-- Jeder Test-Zyklus (`cycle_seconds`) legt Test-Jobs in der Reihenfolge der Testliste nach `<work_dir>/<stufe>/offen`, höchstens so viele offene Test-Jobs je Stufe, wie `[limits]` erlaubt, verfolgt die Übernahme und sammelt die Reports ein.
+- Jeder Test-Zyklus (`cycle_seconds`) legt Test-Jobs in der Reihenfolge der Testliste nach `<work_dir>/<stufe>/offen`, höchstens so viele offene Test-Jobs je Stufe, wie `[limits]` erlaubt (Restore: `restore_big_job` + `restore_small_job`), verfolgt die Übernahme und sammelt die Reports ein.
 - Job-Datei und Report werden wie im Produktionsbetrieb nach `<work_dir>/<stufe>/archiv/` verschoben. Das Ergebnis jedes Test-Jobs bleibt in `<work_dir>/test/<stufe>/ausgang/<job_id>` liegen (z. B. die `.aqc.json` des QC).
 - Ohne Wirkung auf die Produktion: Die JSON wird nicht geschrieben; Proxys, Master und Eingänge werden weder verschoben noch gelöscht oder ausgeliefert; kein EditShare-Feld; kein neuer Versuch bei `failed`. Eine verschwundene Test-Job-Datei wird nach 30 Minuten neu ausgelegt.
 - Arbeitsordner und FFE-Referenzdateien stellt Marathon wie in jedem Job-Zyklus bereit.
@@ -378,7 +463,7 @@ python marathon.py test-qc
 **Testbericht** (`reports/test_<stempel>.txt`):
 
 - Kopf: Testliste, Start, Bericht, Anzahl Tests, `Ergebnisse` (vom Worker gemeldet, nach Status) und getrennt davon `Abgebrochen` bzw. `Nicht ausgelegt`. Sind Stufe, Preset oder Ausgangsordner bei allen Tests gleich, stehen sie nur im Kopf.
-- Je Test ein Block wie im Detailbericht: `#<Nr>  <STATUS>  <Test>`, dann clip_id, Worker, Job und Ergebnis. Bei abgelehnten QC-Tests zusätzlich `Fehler` und `Ist` aus dem Prüfbericht im Test-Ausgang.
+- Je Test ein Block wie im Detailbericht: `#<Nr>  <STATUS>  <Test>`, dann clip_id, Worker, Job und Ergebnis. Bei abgelehnten QC-Tests zusätzlich `Fehler` und `Ist` aus dem Prüfbericht im Test-Ausgang, bei Restore-Tests je Clip eine Zeile `Clip` mit `vollständig`/`unvollständig` und Gründen.
 - Am Ende die Hinweise des Test-Laufs.
 
 | Status | Bedeutung |
@@ -405,7 +490,10 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 | operation | retry_minutes | Wartezeit nach fehlgeschlagenem Auto-Bericht |
 | timing | cycle_seconds | Sekunden zwischen zwei Job-Zyklen |
 | timing | max_job_attempts | Versuche je Job, danach dauerhaft fehlgeschlagen |
-| limits | restore / transcode / qc | Maximal offene Jobs je Stufe (0 = keine neuen Jobs) |
+| limits | restore_big_job | Maximal gleichzeitige große Restore-Jobs, offen oder laufend (0 = keine neuen großen Jobs) |
+| limits | restore_small_job | Maximal gleichzeitige kleine Restore-Jobs, offen oder laufend (0 = keine neuen kleinen Jobs) |
+| limits | transcode / qc | Maximal offene Jobs je Stufe (0 = keine neuen Jobs) |
+| restore | small_job_clips | Höchstens so viele Clips in einem kleinen Restore-Job (ab 1, vorgesehen 10) |
 | heartbeat | worker_timeout_minutes | Minuten ohne Lebenszeichen, bis ein Worker als ausgefallen gilt |
 | heartbeat | max_job_hours | Stunden, ab denen ein laufender Job im Bericht gemeldet wird |
 | veritone | base_url | Basis-URL der Veritone Assets-API |
@@ -432,4 +520,5 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 - `reports/test_<stempel>.txt` – Testbericht eines Test-Laufs
 - `state/journal_<stufe>.jsonl` – Job-Protokoll seit dem letzten Detailbericht; danach in `state/journal/details_<stufe>_<stempel>.jsonl`
 - `reports/errors/test-qc_<stempel>_errors.txt` – von `test-qc` übersprungene Clips
+- `reports/transfer_<stempel>.txt`, `reports/errors/transfer_<stempel>_errors.txt`, `state/backup/marathon.v7_<stempel>.json` – Bericht, Fehlerbericht und Sicherung des Transfer-Scripts
 - `test/test.json` – Stand des Test-Modus (offener Test-Lauf, IDs aller Test-Jobs); nicht löschen, solange Test-Jobs auf dem SMB liegen

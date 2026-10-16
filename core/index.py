@@ -38,13 +38,13 @@ def _admit(clips: dict, clip_id: str, hit: dict, ctx: dict) -> None:
     collection, clip, text = hit["collection"], new_clip(clip_id, hit), clip_text(hit)
     places = ((final_folder(collection), "Zielordner"), (qc_inbox(collection), "QC-Eingang"))
     proxy = next(((folder, name, source) for folder, source in places if (name := find_proxy(ctx, folder, clip))), None)
-    missing = missing_masters(ctx, collection, clip_id, hit["masters"])
+    missing = missing_masters(ctx, collection, clip_id, hit["master_files"])
     if proxy is None and missing != [] and hit["restore_problem"]:
         issue(ctx, "skipped", problem_categories["restore"][0], clip_id, f"{text}: {hit['restore_problem']}")
         return
     ready = bool(proxy) and proxy[2] == "Zielordner"
     if missing is not None and not ready:  # Recorded so the folder is deleted once the clip is ready.
-        clip["files"]["master"] = {"folder": master_folder(collection, clip_id), "names": list(hit["masters"]),
+        clip["files"]["master"] = {"folder": master_folder(collection, clip_id), "names": list(hit["master_files"]),
                                    "source": "Transcode-Eingang", "last_seen_at": now()}
     if proxy:
         clip["files"]["proxy"] = file_entry(*proxy)
@@ -56,22 +56,35 @@ def _admit(clips: dict, clip_id: str, hit: dict, ctx: dict) -> None:
         add_event(clip, f"Aufgenommen – Proxy im {proxy[2]}", proxy[1])
     elif missing == []:
         clip["stage"] = "transcode"
-        add_event(clip, "Aufgenommen – Master im Transcode-Eingang", ", ".join(hit["masters"]))
+        add_event(clip, "Aufgenommen – Master im Transcode-Eingang", ", ".join(hit["master_files"]))
     else:
         if missing:
             issue(ctx, "note", "Master unvollständig im Transcode-Eingang – neuer Restore", clip_id,
                    f"{text}: fehlend {', '.join(missing)}")
-        add_event(clip, "Aufgenommen – wartet auf Restore", ", ".join(hit["masters"]))
+        add_event(clip, "Aufgenommen – wartet auf Restore", ", ".join(hit["master_files"]))
     clips[clip_id] = clip
+
+
+def masters_text(masters: list[dict]) -> str:
+    """Master files as 'name (hash, size Byte, tapes)' for messages."""
+    return " | ".join(f"{entry['file']} ({entry['flow_hash']}, {entry['size']} Byte, {', '.join(entry['tapes'])})"
+                      for entry in masters)
 
 
 def _changes(clip: dict, hit: dict) -> str:
     """Differences between JSON and search; an unknown Veritone-ID on either side is no difference."""
     new = {"collection": hit["collection"], "identifier": hit["identifier"], "title": hit["title"],
-           "clip_name_with_extension": hit["clip_name"], "master_files": hit["masters"], "filehashes": hit["hashes"],
+           "clip_name_with_extension": hit["clip_name"], "masters": None if hit["restore_problem"] else hit["masters"],
            "veritone_id": hit["veritone_id"]}
-    return "; ".join(f"{label}: {clip.get(key)!r} → {new[key]!r}" for key, label in tracked_fields.items()
-                     if clip.get(key) is not None and new[key] is not None and clip[key] != new[key])
+
+    def text(key: str, value) -> str:
+        return masters_text(value) if key == "masters" else repr(value)
+
+    changes = [f"{label}: {text(key, clip.get(key))} → {text(key, new[key])}" for key, label in tracked_fields.items()
+               if clip.get(key) is not None and new[key] is not None and clip[key] != new[key]]
+    if hit["restore_problem"]:
+        changes.append(f"{tracked_fields['masters']}: {hit['restore_problem']}")
+    return "; ".join(changes)
 
 
 def _fill(clip: dict, hit: dict) -> list[str]:

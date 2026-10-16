@@ -6,7 +6,7 @@ from .constants import (
     lost_master, lost_proxy, outbox, protocol_suffixes, report_statuses, stages, status_codes, veritone_missing)
 from .config import ignored
 from .util import clip_text, format_detail, issue, now
-from .layout import final_folder, master_folder, master_root, qc_inbox, stage_folder
+from .layout import final_folder, job_folder, master_folder, master_root, qc_inbox, stage_folder
 from .share import dirs, has_file, listing
 from .state import add_event, position
 from .naming import proxy_ids, proxy_text
@@ -154,9 +154,12 @@ def leftovers(state: dict, mapping: list[dict], ctx: dict) -> None:
                for clip in clips if clip["files"]["proxy"]}
     masters = {clip["files"]["master"]["folder"] for clip in clips
                if clip["files"]["master"] and not clip["files"]["master"].get("deleted_at")}
-    jobs = {clip["job"]["id"] for clip in clips if clip["job"]}
+    jobs = {clip["job"]["id"] for clip in clips if clip["job"]} | set(state["restore"]["jobs"])
+    outputs = f"{job_folder('restore')}/{outbox}"
+    for job_id in sorted(dirs(ctx, outputs) - jobs):
+        issue(ctx, "note", "Ausgang ohne aktuellen Job", f"{outputs}/{job_id}", f"{outputs}/{job_id}")
     for entry in mapping:
-        for stage in stages:
+        for stage in (stage for stage in stages if stage != "restore"):
             outputs = f"{stage_folder(entry['name'], stage)}/{outbox}"
             for job_id in sorted(dirs(ctx, outputs) - jobs):
                 issue(ctx, "note", "Ausgang ohne aktuellen Job", f"{outputs}/{job_id}", f"{outputs}/{job_id}")

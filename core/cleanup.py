@@ -7,11 +7,10 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 
-from .constants import (
-    assignment_unclear, busy_suffixes, field_names, ingest_source, protocol_suffixes, system_files, worker_dir)
+from .constants import assignment_unclear, busy_suffixes, ingest_source, protocol_suffixes, system_files, worker_dir
 from .config import cfg, state_path
 from .console import log
-from .util import context, joined, now, stamp
+from .util import context, now, stamp
 from .layout import check_root, final_folder, load_mapping, master_folder, qc_inbox, share_path
 from .share import ensured_folders, has_file, safe_work_path, subfolders, work_inventory
 from .state import add_event, file_entry, keep_notes, load_state, position, save_state, set_issue
@@ -75,7 +74,7 @@ def _busy_workers(entries: dict[str, tuple[str, int, int]]) -> list[str]:
                 if not isinstance(data, dict) or "job_id" not in data:
                     raise ValueError("ungültiger Heartbeat")
                 fresh = datetime.now().timestamp() - mtime / 1_000_000_000 < cfg["worker_timeout_minutes"] * 60
-                if fresh or data["job_id"]:
+                if fresh or data["job_id"] or data.get("job_ids"):
                     problems.append(f"Worker noch aktiv oder Job gemeldet: {relative}")
             except (OSError, ValueError, UnicodeError):
                 problems.append(f"Worker-Status nicht prüfbar: {relative}")
@@ -126,13 +125,12 @@ def _rebuild_process_state(state: dict) -> dict:
             clip.update(ready=proxy[2] == "Zielordner", stage=None if proxy[2] == "Zielordner" else "qc")
         elif missing == []:
             clip["stage"] = "transcode"
-        elif not clip["master_files"] or len(clip["master_files"]) != len(clip["filehashes"]):
-            set_issue(clip, "sticky", assignment_unclear,
-                       f"Dateinamen und Hashes reichen nicht für Restore; {field_names['userpath']}={joined(clip['master_files'])}, "
-                       f"{field_names['hash']}={joined(clip['filehashes'])}, {field_names['backups']}={joined(clip['lto_tapes'])}")
+        elif not clip["masters"]:
+            set_issue(clip, "sticky", assignment_unclear, "Keine Dateien aus EditShare (masters leer) für einen Restore")
         update_activity(clip, ctx)
         clip["status"] = status(clip)
         add_event(clip, "Prozesszustand nach Bereinigung neu aufgebaut", f"Vorher: {previous}")
+    state["restore"]["jobs"] = {}  # The counter stays so job ids remain unique.
     state.update(workers={}, updated_at=now())
     keep_notes(state, [dict(item, section="note") for item in ctx["issues"]])
     return state

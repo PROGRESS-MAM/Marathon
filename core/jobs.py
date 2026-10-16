@@ -6,8 +6,8 @@ Worker rules (paths relative to the share root, "/" as separator):
 - Take the first *.json in <work_dir>/<stage>/offen (sorted by name) by renaming it into laufend/<worker>/;
   FileNotFoundError or PermissionError: another worker was faster or the job was withdrawn, try the next one.
 - Read inputs only where the job says; write results only into the job's output_folder.
-  Restore: all names from "files"; Transcode: exactly one proxy named exactly "proxy_name", optionally one new master
-  (repaired and/or with FFE title) named <identifier>__<title>.<suffix>; QC: never move the proxy.
+  Restore: collective jobs with "items" (core.restore); Transcode: exactly one proxy named exactly "proxy_name",
+  optionally one new master (repaired and/or with FFE title) named <identifier>__<title>.<suffix>; QC: never move the proxy.
 - Leave the job file in laufend; write the report as <report_folder>/<job_id>.json via a temp name not ending
   in ".json": {"job_id": str, "status": "ok"|"failed"|"rejected" (QC only), "result": str (required unless ok),
   "preset": str|null, "new_master": str|null (Transcode only: file name of the new master)}.
@@ -28,10 +28,11 @@ from .constants import (
     master_blocked, missing_job_grace, outbox, protocol_suffixes, qc_rejected, qc_report_suffix, stage_labels, stages)
 from .config import cfg, ignored
 from .util import age, clip_text, file_name, format_detail, issue, normalize, now, stamp
-from .layout import final_folder, job_folder, join, master_folder, qc_inbox, share_path, stage_folder
+from .layout import final_folder, job_folder, join, qc_inbox, share_path, stage_folder
 from .share import (
-    DeliveryBlocked, MasterBlocked, delete_job_file, deliver_proxy, ensure_folders, job_output, listing, move,
-    output_archive, remove_tree, rmdir, running, scan, store_master, subfolders, write_text_atomic)
+    DeliveryBlocked, MasterBlocked, archive_job, delete_job_file, deliver_proxy, ensure_folders, job_output, listing, move,
+    remove_tree, retire_job, rmdir, running, scan, store_master, write_text_atomic)
+from . import restore
 from .state import add_event, enter, file_entry, set_issue
 from .naming import defa_id, proxy_name
 from .ffe import reference_clips, reference_image, sync_references
@@ -41,17 +42,11 @@ from .audit import check_files, report_problem, status, update_activity
 from .details import record_job
 
 
+# --------- STATIC ---------
+clip_stages = tuple(stage for stage in stages if stage != "restore")  # Stages with one job per clip.
+
+
 # --------- FUNC ---------
-def archive_job(job: dict) -> str | None:
-    """Move the job file (job["folder"], job["file"]) to archiv; returns the worker folder it was found in."""
-    folder, name = job["folder"], job["file"]
-    for worker in subfolders(f"{folder}/laufend"):
-        if move(f"{folder}/laufend/{worker}/{name}", f"{folder}/archiv"):
-            return worker
-    move(f"{folder}/offen/{name}", f"{folder}/archiv")
-    return None
-
-
 def _finish_output(job: dict, keep: bool, ctx: dict) -> str | None:
     """Archive (keep=True) or delete whatever is left in the job's output folder; returns the archived file or folder.
 
@@ -65,7 +60,7 @@ def _finish_output(job: dict, keep: bool, ctx: dict) -> str | None:
         lone = items[0] if len(items) == 1 and items[0].is_file() else None
         flat = job["stage"] == "qc" and lone is not None and lone.name.casefold().endswith(qc_report_suffix)
         source, target, name = (f"{out}/{lone.name}", f"{job_folder('qc')}/archiv", f"{job['id']}{qc_report_suffix}") if flat \
-            else (out, output_archive(out), f"{job['id']}.{outbox}")
+            else (out, f"{out.rsplit('/', 2)[0]}/archiv", f"{job['id']}.{outbox}")
         try:
             moved = move(source, target, name)
         except OSError as exc:
@@ -91,17 +86,7 @@ def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
     """Move the results of a successful job to the next stage; returns a problem text instead."""
     stage, out, collection = job["stage"], job["output_folder"], clip["collection"]
     delivered = {key: name for key, (name, size) in scan(out).items() if size and not key.endswith(busy_suffixes)}
-    if stage == "restore":
-        missing = [name for name in clip["master_files"] if name.casefold() not in delivered]
-        if missing:
-            return f"Restore unvollständig, fehlend: {', '.join(missing)}"
-        target = master_folder(collection, clip["clip_id"])
-        for name in clip["master_files"]:
-            move(f"{out}/{delivered[name.casefold()]}", target, name, replace=True)
-        clip["files"]["master"] = {"folder": target, "names": list(clip["master_files"]), "source": "Restore",
-                                   "last_seen_at": now()}
-        enter(clip, "transcode")
-    elif stage == "transcode":
+    if stage == "transcode":
         new_master = str(report.get("new_master") or "").strip()
         if new_master and (problem := _master_problem(clip, new_master, delivered)):
             return problem
@@ -179,18 +164,6 @@ def _apply_report(clip: dict, job: dict, report: dict, worker: str | None, ctx: 
     return "failed", report_result, None
 
 
-def _retire(folder: str, job_id: str, ctx: dict) -> None:
-    """Archive job file and output folder of a job Marathon no longer tracks, if they exist."""
-    found = running(ctx, folder).get(f"{job_id}.json".casefold())
-    if not found:
-        return
-    relative = f"{folder}/laufend/{found[0]}/{found[1]}"
-    output = job_output(relative, Path(found[1]).stem)
-    move(relative, f"{folder}/archiv")
-    if output and share_path(output).is_dir():
-        move(output, output_archive(output), f"{Path(found[1]).stem}.{outbox}")
-
-
 def _collect_reports(folder: str, jobs: dict[str, dict], ctx: dict, test_ids: frozenset[str]) -> None:
     for name, _ in sorted(scan(f"{folder}/fertig").values()):
         if not name.casefold().endswith(".json") or Path(name).stem.casefold() in test_ids:
@@ -209,7 +182,7 @@ def _collect_reports(folder: str, jobs: dict[str, dict], ctx: dict, test_ids: fr
         if clip is None or clip["job"]["folder"] != folder:
             issue(ctx, "note", "Veralteter Jobreport (ignoriert und archiviert)", relative, relative)
             move(relative, f"{folder}/archiv", archived)
-            _retire(folder, report["job_id"], ctx)
+            retire_job(folder, report["job_id"], ctx)
             continue
         job = jobs.pop(report["job_id"])["job"]
         worker = archive_job(job) or job.get("worker")
@@ -267,11 +240,16 @@ def _sweep_unknown_jobs(folder: str, known: set[str], ctx: dict) -> None:
                    f"{folder}/laufend/{worker}/{name}")
 
 
-def withdraw(clip: dict) -> bool:
-    """Delete a job that no worker has taken; False if it is running, was just taken or cannot be deleted yet."""
+def withdraw(clip: dict, state: dict) -> bool:
+    """Delete a job that no worker has taken; False if it is running, was just taken or cannot be deleted yet.
+
+    A restore job is withdrawn as a whole; its other clips wait for the next job cycle.
+    """
     job = clip["job"]
     if job is None:
         return True
+    if job["stage"] == "restore":
+        return restore.withdraw_clip(state, clip)
     if job["state"] == "laufend":
         return False
     if job["state"] == "offen" and not delete_job_file(f"{job['folder']}/offen/{job['file']}"):
@@ -285,8 +263,6 @@ def withdraw(clip: dict) -> bool:
 def _stage_fields(clip: dict, stage: str) -> dict:
     """Stage fields of a job; values are built lazily so that test jobs can replace fields the clip cannot provide."""
     master, proxy = clip["files"]["master"], clip["files"]["proxy"]
-    if stage == "restore":
-        return {"hashes": lambda: clip["filehashes"], "files": lambda: clip["master_files"]}
     if stage == "transcode":
         return {ffe_flag: lambda: clip[ffe_flag], "ffe_reference_clips": reference_clips, "proxy_name": lambda: proxy_name(clip),
                 "inputs": lambda: [join(master["folder"], name) for name in master["names"]]}
@@ -296,9 +272,9 @@ def _stage_fields(clip: dict, stage: str) -> dict:
 
 def job_payload(clip: dict, stage: str, job_id: str, report_folder: str, output_folder: str,
                 overrides: dict | None = None) -> dict:
-    """Job file content (schema_version 5); overrides replace or add fields (test jobs only)."""
+    """Transcode or QC job file content (schema_version 6); overrides replace or add fields (test jobs only)."""
     overrides = overrides or {}
-    payload = {"schema_version": 5, "job_id": job_id, "stage": stage_labels[stage], "clip_id": clip["clip_id"],
+    payload = {"schema_version": 6, "job_id": job_id, "stage": stage_labels[stage], "clip_id": clip["clip_id"],
                "collection": clip["collection"], "identifier": clip["identifier"], "title": clip["title"],
                "clip_name": clip["clip_name_with_extension"], "created_at": now(),
                "report_folder": report_folder, "output_folder": output_folder}
@@ -321,13 +297,14 @@ def _create_job(clip: dict) -> None:
     add_event(clip, f"{stage_labels[stage]}-Job erstellt", job_id)
 
 
-def _schedule(state: dict, prio: dict[str, list[str]], ctx: dict) -> None:
+def _schedule(state: dict, prio: dict[str, list[str]]) -> None:
     clips = state["clips"].values()
     for clip in clips:
         job = clip["job"]
-        if job and (not clip["active"] or job["stage"] != clip["stage"]):
-            withdraw(clip)
-    for stage in stages:
+        if job and job["stage"] != "restore" and (not clip["active"] or job["stage"] != clip["stage"]):
+            withdraw(clip, state)
+    restore.schedule(state, prio["restore"])
+    for stage in clip_stages:
         ranks = {name: rank for rank, name in enumerate(prio[stage])}
         waiting = sorted((clip for clip in clips if clip["active"] and not clip["ready"] and clip["stage"] == stage and
                           clip["job"] is None),
@@ -346,22 +323,24 @@ def process(state: dict, mapping: list[dict], prio: dict[str, list[str]], ctx: d
     if writing:
         ensure_folders(mapping)
         sync_references(ctx)
-        jobs = {clip["job"]["id"]: clip for clip in clips.values() if clip["job"]}
-        folders = [job_folder(stage) for stage in stages]
-        for folder in folders:
-            _collect_reports(folder, jobs, ctx, test_ids)
+        jobs = {clip["job"]["id"]: clip for clip in clips.values() if clip["job"] and clip["job"]["stage"] != "restore"}
+        for stage in clip_stages:
+            _collect_reports(job_folder(stage), jobs, ctx, test_ids)
+        restore.collect(state, ctx, test_ids)
         write_fields(state)
         ctx["listings"].clear()  # Reports moved files around.
         for clip in clips.values():
-            if clip["job"]:
+            if clip["job"] and clip["job"]["stage"] != "restore":
                 _locate_job(clip, ctx)
-        known = {clip["job"]["file"].casefold() for clip in clips.values() if clip["job"]} | {f"{job_id}.json" for job_id in test_ids}
-        for folder in folders:
-            _sweep_unknown_jobs(folder, known, ctx)
+        restore.locate(state, ctx)
+        known = {clip["job"]["file"].casefold() for clip in clips.values() if clip["job"]} | \
+            {f"{job_id}.json" for job_id in test_ids}
+        for stage in stages:
+            _sweep_unknown_jobs(job_folder(stage), known, ctx)
     for clip in clips.values():
         set_issue(clip, "file", *check_files(clip, ctx))
         update_activity(clip, ctx)
     if writing:
-        _schedule(state, prio, ctx)
+        _schedule(state, prio)
     for clip in clips.values():
         clip["status"] = status(clip)

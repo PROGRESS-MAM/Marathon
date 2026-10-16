@@ -9,15 +9,18 @@ field_names = {
     "identifier": "001 Identifier",
     "title": "014 Title Original",
     "clip_name": "clip_name_with_extension",
-    "hash": "hash",
-    "userpath": "userpath",
     "status_flags": "status_flags",
-    "backups": "display_backups",
-    "size": "filesize",
+    "video": "video.file",
+    "audio": "audio.file",
+    "data": "data.file",
 }
+file_kinds = ("video", "audio", "data")  # Search fields with one file object per master file.
 stages = ("restore", "transcode", "qc")  # Also the stage folder names.
 stage_labels = {"restore": "Restore", "transcode": "Transcode", "qc": "QC"}
-limit_keys = {stage: stage_labels[stage].casefold() for stage in stages}
+limit_keys = {stage: stage_labels[stage].casefold() for stage in stages if stage != "restore"}
+restore_kinds = {"gross": "restore_big_job", "klein": "restore_small_job"}  # Kind of a restore job: its [limits] key.
+restore_kind_labels = {"gross": "groß", "klein": "klein"}
+partial_marker = ".teil-"  # Partial report of a restore job: <job_id>.teil-<stamp>.json
 pool_boxes = ("offen", "laufend", "fertig", "archiv")
 collection_boxes = ("ausgang", "archiv")
 inbox, outbox, worker_dir = "eingang", "ausgang", "worker"
@@ -57,7 +60,7 @@ problem_categories = {  # kind: (category for new clips, category for clips alre
     "invalid": ("Unvollständige oder widersprüchliche Metadaten",
                 "Metadaten in der Suche jetzt unvollständig oder widersprüchlich"),
     "duplicate": ("Doppelter Identifier/Titel", None),
-    "restore": ("Dateinamen und Hashes passen nicht zusammen", None),
+    "restore": ("Dateien in EditShare unvollständig oder widersprüchlich", None),
     "veritone": ("Nicht bei Veritone", "Nicht mehr bei Veritone"),
 }
 metadata_changed = "Metadaten in der Suche geändert"
@@ -74,6 +77,7 @@ commands_help = {
     "stop": "Job-Schleife bzw. Test-Modus anhalten",
     "test": "Test-Modus: Test-Jobs aus der Testliste auslegen und ihre Reports einsammeln; JSON und Dateien bleiben unverändert",
     "test-qc": "QC-Testliste aus der JSON erzeugen (alle Clips mit vorhandenem Proxy im QC-Eingang) und Test-Lauf starten",
+    "test-restore": "Test-Lauf mit genau einem Restore-Test-Job starten (Clips nach der Regel des kleinen Jobs)",
     "test-cancel": "Offenen Test-Lauf beenden: nicht übernommene Test-Jobs zurückziehen, Testbericht schreiben",
     "auto-report": "Täglichen Auto-Bericht einschalten (ab auto_report_time), danach je Stufe ein Detailbericht",
     "auto-report-off": "Täglichen Auto-Bericht ausschalten",
@@ -98,8 +102,7 @@ veritone_placeholder = ("Production.Codec", "placeholder")  # Field and casefold
 veritone_passes = 3  # Paging is not always stable; missing assets are searched again in further passes.
 veritone_settle_seconds = 30  # Wait between triggering a search and reading its pages; the API has no "done" signal.
 tracked_fields = {"collection": "Kollektion", "identifier": field_names["identifier"], "title": field_names["title"],
-                  "clip_name_with_extension": field_names["clip_name"], "master_files": field_names["userpath"],
-                  "filehashes": field_names["hash"], "veritone_id": "Veritone-ID"}
+                  "clip_name_with_extension": field_names["clip_name"], "masters": "Dateien", "veritone_id": "Veritone-ID"}
 ffe_flag = "ffe_tafel"
 ffe_missing = "Kein Clip mit genau dieser defa_id und diesem title"
 ffe_ambiguous = "Mehrere Clips mit genau dieser defa_id und diesem title"

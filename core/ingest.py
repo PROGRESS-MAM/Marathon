@@ -42,7 +42,7 @@ def _ingest_ready(clip: dict, head: str, name: str, ctx: dict) -> bool:
     if sticky and sticky["category"] != job_failed:
         issue(ctx, "ingest_error", "Clip inaktiv", name, f"{head}; {sticky['category']}: {sticky['detail']}")
         return False
-    if not withdraw(clip):
+    if not withdraw(clip, ctx["state"]):
         job = clip["job"]
         issue(ctx, "ingest_error", "Job läuft oder wurde gerade übernommen", name,
                f"{head}; {stage_labels[job['stage']]}-Job {job['id']} bei {job.get('worker') or 'unbekannt'}")
@@ -143,6 +143,7 @@ def ingest(kind: str) -> None:
     if not Path(folder).is_dir():
         raise FileNotFoundError(f"Ordner nicht erreichbar: {folder}; Zustand unverändert.")
     state, ctx = load_state(), context()
+    ctx["state"] = state  # A withdrawn restore job sends all its clips back to the queue.
     if state.get("cleanup", {}).get("pending"):
         raise RuntimeError("Bereinigung noch unvollständig; zuerst 'delete-folder' erneut ausführen.")
     by_id = defaultdict(list)

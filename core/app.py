@@ -22,7 +22,7 @@ from .report import report
 from .details import write_details
 from .ingest import ingest
 from .retry import retry
-from .testrun import cancel_test, start_qc_test, start_test, test_cycle, test_job_ids, test_status
+from .testrun import cancel_test, start_qc_test, start_restore_test, start_test, test_cycle, test_job_ids
 
 
 # --------- FUNC ---------
@@ -78,8 +78,8 @@ def _help_text() -> str:
 def _status_text(mode: str | None, auto: bool) -> str:
     when = cfg.get("auto_report_time")
     auto_text = (f"an (täglich ab {when:%H:%M})" if when else "an") if auto else "aus"
-    return (f"Status: Job-Schleife {'läuft' if mode == 'run' else 'aus'}; Test-Modus {'läuft' if mode == 'test' else 'aus'} "
-            f"({test_status()}); Auto-Bericht {auto_text}.")
+    return (f"Status: Job-Schleife {'läuft' if mode == 'run' else 'aus'}; Test-Modus {'läuft' if mode == 'test' else 'aus'}; "
+            f"Auto-Bericht {auto_text}.")
 
 
 def _console(commands: queue.Queue[str]) -> None:
@@ -184,8 +184,8 @@ def main(argv: list[str] | None = None) -> None:
                 if mode == "test":
                     log("Test-Modus angehalten; der Test-Lauf bleibt offen ('test' setzt ihn fort).")
                 mode, next_cycle, last_skip = "run", now, None
-            elif command in ("test", "test-qc"):
-                (start_qc_test if command == "test-qc" else start_test)()
+            elif command in ("test", "test-qc", "test-restore"):
+                {"test": start_test, "test-qc": start_qc_test, "test-restore": start_restore_test}[command]()
                 if mode == "run":
                     log("Job-Schleife angehalten; Produktions-Jobs und JSON bleiben unverändert.")
                 mode, next_cycle = "test", now
@@ -208,7 +208,7 @@ def main(argv: list[str] | None = None) -> None:
                 ingest(command.removeprefix("ingest-"))
             else:
                 update_index()
-            if command in ("run", "test", "test-qc", "test-cancel", "auto-report"):
+            if command in ("run", "test", "test-qc", "test-restore", "test-cancel", "auto-report"):
                 log(_status_text(mode, auto))
         except Exception as exc:
             log(f"{command!r} fehlgeschlagen: {exc}")

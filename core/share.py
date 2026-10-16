@@ -158,6 +158,28 @@ def output_archive(output_folder: str) -> str:
     return f"{output_folder.rsplit('/', 2)[0]}/archiv"
 
 
+def archive_job(job: dict) -> str | None:
+    """Move the job file (job["folder"], job["file"]) to archiv; returns the worker folder it was found in."""
+    folder, name = job["folder"], job["file"]
+    for worker in subfolders(f"{folder}/laufend"):
+        if move(f"{folder}/laufend/{worker}/{name}", f"{folder}/archiv"):
+            return worker
+    move(f"{folder}/offen/{name}", f"{folder}/archiv")
+    return None
+
+
+def retire_job(folder: str, job_id: str, ctx: dict) -> None:
+    """Archive job file and output folder of a job Marathon no longer tracks, if they exist."""
+    found = running(ctx, folder).get(f"{job_id}.json".casefold())
+    if not found:
+        return
+    relative = f"{folder}/laufend/{found[0]}/{found[1]}"
+    output = job_output(relative, Path(found[1]).stem)
+    move(relative, f"{folder}/archiv")
+    if output and share_path(output).is_dir():
+        move(output, output_archive(output), f"{Path(found[1]).stem}.{outbox}")
+
+
 class DeliveryBlocked(Exception):
     """Raised when a proxy cannot be delivered safely; proxy and master stay in place."""
 
@@ -249,13 +271,13 @@ def work_inventory(roots: list[str]) -> dict[str, tuple[str, int, int]]:
 
 
 def ensure_folders(mapping: list[dict], force: bool = False) -> int:
-    """Create missing work and stage folders; returns how many were created."""
-    folders = {cfg["work_dir"], f"{cfg['work_dir']}/{worker_dir}"}
+    """Create missing work and stage folders; returns how many were created. Restore has one central outbox."""
+    folders = {cfg["work_dir"], f"{cfg['work_dir']}/{worker_dir}", f"{job_folder('restore')}/{outbox}"}
     for stage in stages:
         folders |= {f"{job_folder(stage)}/{box}" for box in pool_boxes}
-        for entry in mapping:
+        for entry in mapping if stage != "restore" else ():
             base = stage_folder(entry["name"], stage)
-            folders |= {f"{base}/{box}" for box in (*collection_boxes, *((inbox,) if stage != "restore" else ()))}
+            folders |= {f"{base}/{box}" for box in (*collection_boxes, inbox)}
     parts = [relative.split("/") for relative in folders]
     folders |= {"/".join(items[:end]) for items in parts for end in range(1, len(items))}
     created = 0
