@@ -1,6 +1,6 @@
 # Marathon – Schnittstellenprotokoll
 
-Stand: 2026-10-16 · gültig für die Versionen in Abschnitt 1
+Stand: 2026-10-19 · gültig für die Versionen in Abschnitt 1
 
 Dieses Protokoll beschreibt alles, was zwischen Marathon und den Workern ausgetauscht wird. Es ersetzt das Hochladen der gesamten Codebase: Jeder Thread erhält diese Datei und nur den Code, der bearbeitet wird.
 
@@ -27,7 +27,7 @@ Dieses Protokoll beschreibt alles, was zwischen Marathon und den Workern ausgeta
 | QC Worker | 2.1.0 | `qc_worker.py` |
 | AQC (Prüftools) | 0.4.1 | `aqc/`, `aqc/tools/` |
 | Restore-Worker (ES-Restore) | 0.3.0 (Restorer 0.3.0, Restore Marathon 0.2.0) | `restorer/`, `marathon/restore_marathon.py`, `marathon/marathon_adapter.py` |
-| Transcode-Worker | nicht vorhanden | – |
+| Transcode-Worker (Transcoder) | 0.1.0 (Transcoder 0.1.0, Transcode Marathon 0.1.0, enthält Marathon-Adapter 1.3.0) | `transcoder/`, `marathon/transcode_marathon.py`, `marathon/marathon_adapter.py` |
 
 Job-`schema_version`: **6** für alle Stufen. Marathon schreibt nur 6; der Marathon-Adapter nimmt nur `(6,)` an.
 
@@ -301,7 +301,15 @@ Danach archiviert Marathon Job-Datei und Report (`<job_id>.report.json`) in `<wo
 - `reason`: `<Code>: <Text>`, wenn bekannt mit Band, Laufwerk und kurzer Session-ID, z. B. `TAPE_DEFECT: Media-Alarm auf LS2048L8, Laufwerk 1 (restorejob_N9SMTL)`. Codes: `INVALID_INPUT`, `NOT_IN_ARK`, `TAPE_MISMATCH`, `TAPES_OFFLINE`, `TAPE_DEFECT`, `DRIVE_ERROR`, `ARK_ERROR`, `STALLED`, `INCOMPLETE`, `NO_SPACE`, `DUPLICATE_FILE`, `ORPHANED`, `CANCELLED`. Marathon zeigt `reason` nur als Text im Bericht.
 - Jobs mit `schema_version` ≠ 6 werden `failed` „Job ungültig“.
 
-**Transcode**: nicht vorhanden – beim ersten Thread zum Transcode-Worker ergänzen.
+**Transcode (Transcode-Worker 0.1.0)**
+
+- Läuft mit `run` und `resume=False`, ein Job nach dem anderen.
+- `failed` „Job ungültig: …“ bei fehlendem `inputs` (nicht leere Liste von Pfaden), fehlendem `proxy_name` oder `proxy_name` mit Ordner, fehlendem oder nicht booleschem `ffe_tafel`, `ffe_tafel: true` ohne `ffe_reference_clips` (nicht leere Liste), fehlendem `identifier` oder `title`.
+- Ausgang bei `ok`: Proxy `proxy_name` (Preset `h264_10mbit_1080p`), optional neuer Master `<identifier>__<title>.mov` (`<>:"/\|?*` und Steuerzeichen → `_`; Preset `dnxhr_hqx`, bei interlaced Quellen `dnxhd_185x`), je Datei `<Datei>.render.json`.
+- Neuer Master, wenn genau ein Tonkanal hörbar ist, eine progressive Quelle schwarze Ränder hat oder `ffe_tafel: true`.
+- Bei `ffe_tafel: true`: vor dem Film der eine Clip aus `ffe_reference_clips` mit Bildgröße und fps der Quelle, danach 1 s Schwarz; Start-TC so, dass der Film beim Start-TC der Quelle beginnt. Gilt für Proxy und neuen Master.
+- `preset`: `h264_10mbit_1080p`, mit neuem Master `h264_10mbit_1080p+dnxhr_hqx` bzw. `h264_10mbit_1080p+dnxhd_185x`. `new_master`: Dateiname des neuen Masters, nur bei `ok`.
+- Status: `ok`, wenn alle Dateien erzeugt sind; `rejected` „Manuelle Prüfung: …“, wenn Analyse oder Reparatur nicht eindeutig sind, keine oder mehrere FFE-Tafeln passen oder ein neuer Master bei unklarem Interlacing nötig ist (CR-015); sonst `failed` (ffmpeg, Dateizugriff, Job ungültig). Bei `rejected` und `failed` enthält der Ausgang keine Mediendateien, höchstens `.render.json`.
 
 ### 3.11 Test-Jobs
 
@@ -328,7 +336,14 @@ Danach archiviert Marathon Job-Datei und Report (`<job_id>.report.json`) in `<wo
 
 ## 4. Anträge
 
-Keine offenen Anträge. Nächste Nummer: **CR-015**.
+Nächste Nummer: **CR-016**.
+
+### CR-015 Transcode: manuelle Prüfung ohne neuen Versuch
+- Von → an: Transcode-Worker → Marathon
+- Stand: offen (Transcode-Worker 0.1.0 meldet `rejected` bereits, Fälle in 3.10; die Schwellen werden mit Archivmaterial noch kalibriert)
+- Inhalt: Transcode-Report mit `status` `rejected`, wenn der Worker den Clip nicht transcodiert, weil eine manuelle Prüfung nötig ist; `result` = `Manuelle Prüfung: <Gründe>`; kein Proxy und kein neuer Master im Ausgang. Marathon: Versuch zählt nicht als Fehlversuch, kein neuer Job, Clip inaktiv „Manuelle Prüfung nötig“, Ausgang nach `…/transcode/archiv/<job_id>.ausgang`, `result` im Detailbericht; `retry-transcode` gibt Clips mit diesem Grund wieder frei.
+- Version: keine neue `schema_version`; Marathon neue Minor-Version
+- Übergang: Bis zur Umsetzung behandelt Marathon `rejected` bei Transcode wie `failed` (3.5); der Transcode-Worker darf `rejected` bereits melden.
 
 Vorlage:
 
@@ -345,4 +360,5 @@ Vorlage:
 
 | Datum | Antrag | Änderung |
 |---|---|---|
+| 2026-10-19 | CR-015 (offen) | Transcode-Worker 0.1.0 in Abschnitt 1 und 3.10 ergänzt; meldet `rejected` bereits (Übergang nach CR-015). |
 | 2026-10-16 | – | Neuer Ausgangspunkt mit den Versionen aus Abschnitt 1: Restore-Sammeljobs mit Teilberichten, `schema_version` 6 für alle Stufen, Marathon-Adapter 1.3.0. Frühere Anträge (bis CR-014) und Einträge abgeschlossen und nicht mehr aufgeführt. |
