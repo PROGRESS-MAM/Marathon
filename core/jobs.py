@@ -34,7 +34,7 @@ from .share import (
     remove_tree, retire_job, rmdir, running, scan, write_text_atomic)
 from . import restore
 from .state import add_event, enter, file_entry, set_issue
-from .masters import archive_old_master, new_master_path, new_master_target, store_new_master
+from .masters import archive_old_master, new_event, new_master_path, new_master_target, store_new_master
 from .naming import defa_id, proxy_name
 from .ffe import reference_clips, reference_image, sync_references
 from .editshare import request_field, write_fields
@@ -83,6 +83,29 @@ def _master_problem(clip: dict, name: str, delivered: dict[str, str]) -> str | N
     return None
 
 
+def _has_new_master(clip: dict) -> bool:
+    """True if the clip's last Transcode stored a new master."""
+    entered = f"Weiter an {stage_labels['transcode']}"
+    event = next((item["event"] for item in reversed(clip["history"]) if item["event"] in (new_event, entered)), None)
+    return event == new_event
+
+
+def _finish_master(clip: dict, ctx: dict) -> None:
+    """After delivery: move the restored master for review (keep_old_master and a new master), otherwise delete it."""
+    master = clip["files"]["master"]
+    if not master or master.get("deleted_at") or master["source"] == ingest_source:  # Ingested masters are kept.
+        return
+    if cfg.get("keep_old_master", False) and _has_new_master(clip):
+        try:
+            archive_old_master(clip, ctx)
+        except (OSError, ValueError, MasterBlocked) as exc:
+            issue(ctx, "note", "Master nicht verschiebbar (bleibt liegen)", master["folder"], f"{master['folder']}: {exc}")
+        return
+    remove_tree(master["folder"], ctx, "Master nicht löschbar (bleiben liegen)")
+    if not share_path(master["folder"]).exists():
+        master["deleted_at"] = now()
+
+
 def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
     """Move the results of a successful job to the next stage; returns a problem text instead."""
     stage, out, collection = job["stage"], job["output_folder"], clip["collection"]
@@ -128,19 +151,10 @@ def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
         done = proxy["folder"] == final or (not share_path(source).exists() and target.is_file() and target.stat().st_size > 0)
         if not done and (not share_path(source).is_file() or not share_path(source).stat().st_size):
             return f"Proxy {source} vor der Auslieferung nicht vorhanden oder leer"
-        if cfg.get("keep_old_master", False):
-            try:
-                archive_old_master(clip, ctx)
-            except (OSError, ValueError) as exc:
-                raise MasterBlocked(f"Sicherung des alten Masters fehlgeschlagen: {exc}") from exc
         if not done:
             deliver_proxy(source, final, proxy["name"])
         clip["files"]["proxy"] = file_entry(final, proxy["name"], "QC")
-        master = clip["files"]["master"]
-        if not cfg.get("keep_old_master", False) and master and not master.get("deleted_at") and master["source"] != ingest_source:  # Ingested masters are kept.
-            remove_tree(master["folder"], ctx, "Master nicht löschbar (bleiben liegen)")
-            if not share_path(master["folder"]).exists():
-                master["deleted_at"] = now()
+        _finish_master(clip, ctx)
         clip.update(ready=True, stage=None)
         add_event(clip, "Bereit", f"{final}/{proxy['name']}")
         request_field(clip, final, proxy["name"])

@@ -2,12 +2,10 @@
 # --------- IMPORTS ---------
 from pathlib import Path
 import os
-import shutil
 import stat
 import unicodedata
 
 from .config import cfg
-from .console import log
 from .constants import ingest_source, invalid_path_chars, master_blocked, reserved_names
 from .layout import share_path
 from .share import MasterBlocked, safe_work_path
@@ -17,7 +15,7 @@ from .util import issue, now
 
 # --------- CONFIG ---------
 app_name = "Marathon Masterablage"
-app_version = "1.18.1"
+app_version = "1.18.2"
 review_name = "manuelle Überprüfung"
 new_event = "Neuer Master abgelegt"
 old_origin_event = "Alter Master ursprünglich"
@@ -109,26 +107,6 @@ def _place(source: Path, target: Path) -> None:
         raise MasterBlocked(f"Verschieben nach {target} konnte nicht bestätigt werden")
 
 
-def _copy_kept(source: Path, target: Path) -> None:
-    """Copy a file whose original must stay (ingest): read once, check the size, publish under the final name."""
-    source, target = _safe(source), _safe(target)
-    size = _size(source)
-    if found := _existing(target):
-        if found.name == target.name and _size(found) == size:
-            return  # Complete copy of an earlier, interrupted run.
-        raise MasterBlocked(f"Namenskonflikt: {target}; Original bleibt erhalten")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    part = _safe(target.with_name(f".{target.name}.part"))
-    log(f"Kopiere Ingest-Master: {source.name} ({size / 1e9:.1f} GB)")
-    try:
-        shutil.copyfile(source, part)  # Overwrites a leftover part file of an interrupted copy.
-        if _size(part) != size:
-            raise MasterBlocked(f"Kopie unvollständig: {part}")
-        _rename(part, target)
-    finally:
-        part.unlink(missing_ok=True)
-
-
 def new_master_target(clip: dict, name: str) -> Path:
     """Storage path of a new master for the current keep_old_master setting."""
     folder = review_folder(clip) / "neu" if cfg.get("keep_old_master", False) else _root()
@@ -153,9 +131,9 @@ def store_new_master(clip: dict, relative: str, name: str, ctx: dict) -> Path:
 
 
 def archive_old_master(clip: dict, ctx: dict) -> None:
-    """Move all old master files into alt after QC; ingested originals are copied and kept."""
+    """Move all files of a restored master into alt after QC; ingested masters stay untouched."""
     master = clip["files"]["master"]
-    if not master or master.get("deleted_at"):
+    if not master or master.get("deleted_at") or master["source"] == ingest_source:
         return
     target = _safe(review_folder(clip) / "alt")
     source = _safe(share_path(master["folder"]))
@@ -167,11 +145,8 @@ def archive_old_master(clip: dict, ctx: dict) -> None:
     for name in names:
         if Path(name).name != name or any(char in invalid_path_chars for char in name):
             raise MasterBlocked(f"Unsicherer Masterdateiname: {name!r}")
-    kept = master["source"] == ingest_source
     for name in names:
-        if kept:
-            _copy_kept(source / name, target / name)
-        elif os.path.lexists(source / name):
+        if os.path.lexists(source / name):
             _place(source / name, target / name)
         elif not (target / name).is_file():  # Moved by an interrupted run.
             raise MasterBlocked(f"Alte Masterdatei fehlt: {source / name}")
@@ -179,11 +154,10 @@ def archive_old_master(clip: dict, ctx: dict) -> None:
     master.update(folder=str(target), last_seen_at=now())
     add_event(clip, "Alter Master gesichert", str(target))
     _checkpoint(ctx)
-    if not kept:
-        try:
-            source.rmdir()
-        except OSError:
-            pass  # Not empty or already gone.
+    try:
+        source.rmdir()
+    except OSError:
+        pass  # Not empty or already gone.
 
 
 # --------- FUNC REVIEW CLEANUP ---------
@@ -296,7 +270,7 @@ def cleanup_review(state: dict, ctx: dict) -> None:
                 master = clip["files"]["master"]
                 if share_path(master["folder"]).absolute() == group / "alt":
                     origin = _last_path(clip, old_origin_event)
-                    if master["source"] == ingest_source and origin:
+                    if master["source"] == ingest_source and origin:  # Copy made by 1.18.1; the original stays.
                         master.update(folder=str(origin), last_seen_at=now())
                     else:
                         master["deleted_at"] = now()

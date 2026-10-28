@@ -245,11 +245,6 @@ def deliver_proxy(relative: str, final: str, name: str) -> None:
     _place(relative, final, name, DeliveryBlocked, "Proxy und Master bleiben erhalten")
 
 
-def store_master(relative: str, folder: str, name: str) -> None:
-    """Move a new master from Transcode into master_dir; raises MasterBlocked instead of overwriting."""
-    _place(relative, folder, name, MasterBlocked, "Ausgang wird archiviert, nichts gelöscht")
-
-
 def work_inventory(roots: list[str]) -> dict[str, tuple[str, int, int]]:
     """Snapshot all entries; any links, special files or unreadable folders block deletion."""
     entries = {}

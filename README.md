@@ -67,6 +67,17 @@ Ohne Fehler:
 
 Bei einem Fehler bleibt die JSON Version 7; der Fehlerbericht `reports/errors/transfer_<stempel>_errors.txt` nennt alle Gründe, bei Ordnern jeden betroffenen Ordner mit seinen Dateien. Scheitert das Entfernen eines Ordners trotz Prüfung, nennt er die bereits entfernten leeren Ordner.
 
+## Update auf 1.18.3
+
+- Nur `core/jobs.py`, `core/share.py` und `core/__init__.py` ersetzen; Konfiguration und JSON bleiben unverändert.
+- Der Master aus dem Restore wird nur noch dann in die Prüfungsablage verschoben, wenn der Transcode einen neuen Master erzeugt hat, der Proxy das QC bestanden hat und ausgeliefert ist und `keep_old_master = true` gilt. In allen anderen Fällen wird er nach bestandenem QC wie bisher gelöscht.
+
+## Update auf 1.18.2
+
+- Nur `core/masters.py` und `core/__init__.py` ersetzen; Konfiguration und JSON bleiben unverändert.
+- Bei `keep_old_master = true` kommen nur noch Master aus dem Restore in die Prüfungsablage; Ingest-Master bleiben unverändert im Masterordner.
+- Bereits kopierte Ingest-Master in `manuelle Überprüfung/<Clipname>/alt/` werden wie bisher entfernt, sobald `keep_old_master = false` gesetzt ist.
+
 ## Update auf 1.18.1
 
 - Nur `core/masters.py`, `core/jobs.py` und `core/__init__.py` ersetzen; Konfiguration und JSON bleiben unverändert.
@@ -249,10 +260,10 @@ Maßgeblich ist der Wert beim Erstellen des Jobs.
 
 | QC | Proxy | Master aus Restore | Neuer Master in `master_dir` | EditShare-Feld |
 | --- | --- | --- | --- | --- |
-| bestanden | in den Zielordner | bei `keep_old_master=false` gelöscht, bei `true` gesichert | bleibt final oder in der Prüfungsablage | wird gesetzt |
+| bestanden | in den Zielordner | nach der Auslieferung gelöscht; bei neuem Master und `keep_old_master=true` stattdessen nach `alt` verschoben | bleibt final oder in der Prüfungsablage | wird gesetzt |
 | nicht bestanden | bleibt im QC-Eingang | bleibt | bleibt | – |
 
-- Bei `keep_old_master=false`: Proxy ausliefern, Master aus Restore löschen, EditShare-Feld setzen. Bei `true`: alten Master vollständig sichern, Proxy ausliefern, EditShare-Feld setzen. Originaldateien aus `ingest-master` werden weiterhin nicht gelöscht; für die Prüfungsablage werden sie kopiert.
+- Proxy ausliefern, Master aus Restore löschen, EditShare-Feld setzen. Nur wenn der Transcode einen neuen Master erzeugt hat und `keep_old_master=true` gilt, wird der Master aus Restore nach der Auslieferung nicht gelöscht, sondern in die Prüfungsablage verschoben. Lässt er sich nicht verschieben, bleibt er liegen (Hinweis im Bericht). Master aus `ingest-master` bleiben unverändert im Masterordner und kommen nicht in die Prüfungsablage.
 - Vor der Auslieferung muss der Proxy vorhanden und größer als 0 Byte sein. Er wird auf der Freigabe verschoben, nicht kopiert; eine unterbrochene Auslieferung wird beim nächsten Zyklus erkannt und abgeschlossen.
 - Transcode-`rejected` (z. B. nicht kompatibler Master oder unsichere Analyse): direkt inaktiv mit manueller Fehlermeldung; kein automatischer weiterer Transcode-Versuch.
 - QC nicht bestanden: Clip inaktiv (`QC nicht bestanden`), Eintrag in der Fehlerliste des Berichts, Gründe im Detailbericht QC.
@@ -284,12 +295,12 @@ Bei `true`:
 ++ Master repariert/
   manuelle Überprüfung/
     <Clipname ohne Dateiendung>/
-      alt/   sämtliche Dateien des alten Masters
+      alt/   sämtliche Dateien des alten Masters aus dem Restore
       neu/   neuer Master
 ~~~
 
-- Der neue Master kommt nach erfolgreichem Transcode nach `neu`. Alte Master bleiben bis zum erfolgreichen QC verfügbar und kommen danach nach `alt`. QC prüft den Proxy; neue Master werden zusätzlich manuell verglichen.
-- Neue Master, alte Restore-Master und Proxys werden auf der Freigabe verschoben, ohne Dateiinhalte zu lesen; vorhandene Ziele werden nie überschrieben. Nur Ingest-Master werden kopiert (einmal gelesen, Größe geprüft), weil ihre Originale bestehen bleiben; dabei meldet die Konsole „Kopiere Ingest-Master …“. Ein unterbrochener Lauf wird beim nächsten Zyklus fortgesetzt.
+- Der neue Master kommt nach erfolgreichem Transcode nach `neu`. Der alte Master bleibt bis zum bestandenen QC verfügbar und kommt nach der Auslieferung des Proxys nach `alt`. Ohne neuen Master gibt es nichts zu vergleichen: Der alte Master wird nach bestandenem QC gelöscht. QC prüft den Proxy; neue Master werden zusätzlich manuell verglichen.
+- Neue Master, alte Restore-Master und Proxys werden auf der Freigabe verschoben, ohne Dateiinhalte zu lesen; vorhandene Ziele werden nie überschrieben. Ingest-Master werden nicht angefasst. Ein unterbrochener Lauf wird beim nächsten Zyklus fortgesetzt.
 - `master_dir` und `root_path` müssen auf derselben Freigabe liegen, sonst ist kein Verschieben ohne Datenübertragung möglich und Marathon meldet den Clip als blockiert.
 - Alte Master und Proxy behalten ihre vorhandenen Dateieinträge in der JSON; die Ablageorte werden bei Marathon-Verschiebungen aktualisiert. Neue Master nutzen die vorhandenen History-Ablageereignisse. Es gibt keine neuen JSON-Felder oder Statusmodelle.
 
@@ -556,7 +567,7 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 | ffe | list_file | FFE-Liste, Pfad relativ zum res-Ordner |
 | ffe | reference_image | Referenz-Screenshot im Ordner `reference_clip_dir`; Name auch auf dem SMB |
 | ffe | reference_clip_dir | Ordner im res-Ordner mit allen FFE-Filmtafel-Clips; nur `.mov` zählen als Clips, mindestens einer nötig; Name auch auf dem SMB |
-| ingest | keep_old_master | `true`: Prüfungsablage behalten; `false`: Prüfungsablage automatisch auflösen und alte Restore-Master nach QC löschen. Fehlender Eintrag: `false` |
+| ingest | keep_old_master | `true`: Prüfungsablage behalten; Master aus Restore mit neuem Master nach bestandenem QC in die Prüfungsablage verschieben statt löschen; `false`: Prüfungsablage automatisch auflösen und alte Restore-Master nach QC löschen. Fehlender Eintrag: `false` |
 | ingest | master_dir | Ordner mit Masterdateien `<DEFA-ID>__<Titel>.<Endung>` (vollständiger Pfad, gleiches Netzlaufwerk wie `root_path`); `ingest-master` liest ihn, neue Master aus Transcode legt Marathon hier ab (ohne Überschreiben) |
 | ingest | proxy_dir | Ordner mit vorhandenen Proxys `<proxy_prefix>__<DEFA-ID>__<Titel>.mp4` (vollständiger Pfad, gleiches Netzlaufwerk wie `root_path`); nur `ingest-proxy` liest ihn |
 | ingest | proxy_prefix | Namensanfang der Proxys in `proxy_dir` (ohne das folgende `__`), z. B. `(c)PROGRESS__10Mbit` |
