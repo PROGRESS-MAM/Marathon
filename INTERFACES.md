@@ -57,7 +57,7 @@ Job-`schema_version`: **6** für alle Stufen. Marathon schreibt nur 6; der Marat
 |---|---|---|---|---|
 | Restore | Sammeljob mit vielen Clips je Hauptband | holt die Masterdateien über Ark vom Band in je einen Clip-Ordner, meldet fertige Clips sofort per Teilbericht | Master in den Transcode-Eingang, weiter an Transcode – schon während der Job läuft | Clip-Ordner löschen, Clip inaktiv (ein Versuch je Clip) |
 | Transcode | ein Job je Clip | erzeugt den Proxy | Proxy in den QC-Eingang, ggf. neuer Master nach `master_dir`, weiter an QC | neuer Job bis `max_job_attempts`, danach inaktiv |
-| QC | ein Job je Clip | prüft den Proxy mit AQC | Proxy in den Zielordner, Master aus Restore löschen, EditShare-Feld setzen, Clip bereit | `rejected`: inaktiv „QC nicht bestanden“; `failed`: neuer Job bis `max_job_attempts` |
+| QC | ein Job je Clip | prüft den Proxy mit AQC | Proxy in den Zielordner, Master aus Restore abhängig von `keep_old_master` löschen oder sichern, EditShare-Feld setzen, Clip bereit | `rejected`: inaktiv „QC nicht bestanden“; `failed`: neuer Job bis `max_job_attempts` |
 
 Inaktive Clips gibt `retry-restore`, `retry-transcode` bzw. `retry-qc` wieder frei. `ingest-master` und `ingest-proxy` setzen Clips mit vorhandenen Dateien direkt in Transcode bzw. QC.
 
@@ -188,7 +188,7 @@ Report: Datei `<report_folder>/<job_id>.json`, geschrieben unter einem temporär
 | Feld | Typ | Pflicht | Inhalt |
 |---|---|---|---|
 | `job_id` | str | ja | wie im Job |
-| `status` | str | ja | `ok`, `failed` oder `rejected` (nur QC; bei anderen Stufen wie `failed`). Restore: `ok`, wenn alle Einträge `restored` sind, sonst `failed` |
+| `status` | str | ja | `ok`, `failed` oder `rejected` (QC und Transcode; Transcode-`rejected` sperrt zur manuellen Prüfung). Restore: `ok`, wenn alle Einträge `restored` sind, sonst `failed` |
 | `result` | str | wenn nicht `ok` | Kurztext |
 | `preset` | str/null | nein | Name des Presets bzw. Prüfplans |
 | `new_master` | str/null | nein | nur Transcode: Dateiname des neuen Masters |
@@ -362,3 +362,9 @@ Vorlage:
 |---|---|---|
 | 2026-10-19 | CR-015 (offen) | Transcode-Worker 0.1.0 in Abschnitt 1 und 3.10 ergänzt; meldet `rejected` bereits (Übergang nach CR-015). |
 | 2026-10-16 | – | Neuer Ausgangspunkt mit den Versionen aus Abschnitt 1: Restore-Sammeljobs mit Teilberichten, `schema_version` 6 für alle Stufen, Marathon-Adapter 1.3.0. Frühere Anträge (bis CR-014) und Einträge abgeschlossen und nicht mehr aufgeführt. |
+
+## Masterablage ab 1.18.0
+
+Die Worker-Schnittstelle bleibt unverändert. Der bestehende Transcode-Report meldet `new_master` wie bisher. Marathon wählt die Ablage über `[ingest] keep_old_master`: `true` für `manuelle Überprüfung/<Clipname>/neu`, `false` für die direkte finale Ablage. Bei `false` löst Marathon vorhandene Prüfungsablagen auf. Aktuelle neue Master-Pfade stehen im jeweils letzten vorhandenen History-Ereignis `Neuer Master abgelegt`; alte Master und Proxy behalten ihre bisherigen Dateieinträge. JSON-Version 8 und Job-Schema 6 bleiben unverändert.
+
+Ab 1.18.0 ist der bereits vorhandene Report-Status `rejected` auch für Transcode nutzbar: Der Clip wird zur manuellen Prüfung blockiert, ohne automatischen zweiten Versuch. Das Report-Schema wird nicht erweitert.

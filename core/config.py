@@ -32,7 +32,7 @@ config_schema = {  # section: {key: kind}; all values and their explanations liv
     "heartbeat": {"worker_timeout_minutes": "number", "max_job_hours": "number"},
     "veritone": {"base_url": "text", "token_file": "text", "field_clip_id": "text"},
     "ffe": {"list_file": "text", "reference_image": "name", "reference_clip_dir": "name"},
-    "ingest": {"master_dir": "text", "proxy_dir": "text", "proxy_prefix": "text"},
+    "ingest": {"keep_old_master": "bool", "master_dir": "text", "proxy_dir": "text", "proxy_prefix": "text"},
     "test": {"test_file": "text"},
 }
 
@@ -45,6 +45,10 @@ cfg: dict = {}
 def _parse_value(kind: str, raw: str):
     if not raw:
         raise ValueError("fehlt oder ist leer")
+    if kind == "bool":
+        if raw.casefold() not in ("true", "false"):
+            raise ValueError("erwartet true oder false")
+        return raw.casefold() == "true"
     if kind in ("count", "number"):
         minimum = int(kind == "number")
         if not raw.isdecimal() or int(raw) < minimum:
@@ -82,7 +86,7 @@ def _read_config() -> dict:
     for section, keys in config_schema.items():
         for key, kind in keys.items():
             try:
-                values[key] = _parse_value(kind, parser.get(section, key, fallback="").strip())
+                values[key] = _parse_value(kind, parser.get(section, key, fallback="false" if key == "keep_old_master" else "").strip())
             except ValueError as exc:
                 problems.append(f"[{section}] {key}: {exc}")
     for section, key in (("paths", "mapping_file"), ("paths", "cred_file"), ("veritone", "token_file"),

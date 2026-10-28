@@ -9,12 +9,12 @@ Worker rules (paths relative to the share root, "/" as separator):
   Restore: collective jobs with "items" (core.restore); Transcode: exactly one proxy named exactly "proxy_name",
   optionally one new master (repaired and/or with FFE title) named <identifier>__<title>.<suffix>; QC: never move the proxy.
 - Leave the job file in laufend; write the report as <report_folder>/<job_id>.json via a temp name not ending
-  in ".json": {"job_id": str, "status": "ok"|"failed"|"rejected" (QC only), "result": str (required unless ok),
+  in ".json": {"job_id": str, "status": "ok"|"failed"|"rejected" (QC/Transcode), "result": str (required unless ok),
   "preset": str|null, "new_master": str|null (Transcode only: file name of the new master)}.
 - FFE: every QC and Transcode job carries "ffe_tafel" (bool). QC jobs name the reference screenshot in
   "ffe_reference_image", Transcode jobs list all FFE title clips in "ffe_reference_clips". Marathon keeps these
   files in <work_dir>/worker/; workers only read them and never write into that folder except their heartbeat.
-- Marathon moves results on (a new master into master_dir, never overwriting), archives job, report and output
+- Marathon moves results on (a new master into master_dir or review folders, never overwriting), archives job, report and output
   leftovers (a lone QC test report as <work_dir>/qc/archiv/<job_id>.aqc.json), deletes failed partial results and
   withdrawn jobs. Every collected production report goes into the job journal (core.details).
 - Test jobs (core.testrun) share the pools; the job loop skips their job files and reports (test_ids).
@@ -31,9 +31,10 @@ from .util import age, clip_text, file_name, format_detail, issue, normalize, no
 from .layout import final_folder, job_folder, join, qc_inbox, share_path, stage_folder
 from .share import (
     DeliveryBlocked, MasterBlocked, archive_job, delete_job_file, deliver_proxy, ensure_folders, job_output, listing, move,
-    remove_tree, retire_job, rmdir, running, scan, store_master, write_text_atomic)
+    remove_tree, retire_job, rmdir, running, scan, write_text_atomic)
 from . import restore
 from .state import add_event, enter, file_entry, set_issue
+from .masters import _copy, _remove_source, archive_old_master, new_master_path, store_new_master
 from .naming import defa_id, proxy_name
 from .ffe import reference_clips, reference_image, sync_references
 from .editshare import request_field, write_fields
@@ -88,19 +89,31 @@ def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
     delivered = {key: name for key, (name, size) in scan(out).items() if size and not key.endswith(busy_suffixes)}
     if stage == "transcode":
         new_master = str(report.get("new_master") or "").strip()
-        if new_master and (problem := _master_problem(clip, new_master, delivered)):
+        recorded = new_master_path(clip)
+        resumed_master = bool(new_master and new_master.casefold() not in delivered
+                              and recorded and recorded.name == new_master
+                              and recorded.is_file() and recorded.stat().st_size > 0)
+        if new_master and (problem := _master_problem(clip, new_master, delivered)) and not resumed_master:
             return problem
         proxies = [name for key, name in delivered.items() if not key.endswith(protocol_suffixes) and key != new_master.casefold()]
-        if len(proxies) != 1:
+        expected = proxy_name(clip)
+        proxy = clip["files"]["proxy"]
+        resumed_proxy = bool(not proxies and proxy and proxy["name"] == expected
+                             and proxy["folder"] == qc_inbox(collection)
+                             and share_path(join(proxy["folder"], proxy["name"])).is_file())
+        if len(proxies) != 1 and not resumed_proxy:
             return f"Transcode-Ausgang enthält {len(proxies)} Proxy-Dateien statt einer"
-        name, expected = proxies[0], proxy_name(clip)
+        name = expected if resumed_proxy else proxies[0]
         if not expected or name.casefold() != expected.casefold():
             return f"Proxy-Name {name!r} statt {expected!r} (proxy_name im Job)"
-        if new_master:  # Not tracked further; master_dir belongs to the operator.
+        if new_master and not resumed_master:
             new_master = delivered[new_master.casefold()]
-            store_master(f"{out}/{new_master}", cfg["master_dir"], new_master)
-            add_event(clip, "Neuer Master abgelegt", join(cfg["master_dir"], new_master))
-        move(f"{out}/{name}", qc_inbox(collection), expected, replace=True)
+            try:
+                store_new_master(clip, f"{out}/{new_master}", new_master, ctx)
+            except (OSError, ValueError) as exc:
+                raise MasterBlocked(f"Masterablage fehlgeschlagen: {exc}") from exc
+        if not resumed_proxy:
+            move(f"{out}/{name}", qc_inbox(collection), expected, replace=True)
         clip["files"]["proxy"] = file_entry(qc_inbox(collection), expected, "Transcode")
         clip["preset"] = report.get("preset")
         enter(clip, "qc")
@@ -109,10 +122,24 @@ def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
         source = f"{proxy['folder']}/{proxy['name']}"
         if not share_path(source).is_file() or not share_path(source).stat().st_size:
             return f"Proxy {source} vor der Auslieferung nicht vorhanden oder leer"
-        deliver_proxy(source, final, proxy["name"])
-        clip["files"]["proxy"] = file_entry(final, proxy["name"], "QC")
+        if cfg.get("keep_old_master", False):
+            try:
+                archive_old_master(clip, ctx)
+            except (OSError, ValueError) as exc:
+                raise MasterBlocked(f"Sicherung des alten Masters fehlgeschlagen: {exc}") from exc
+        target = share_path(join(final, proxy["name"])).absolute()
+        original_proxy = source if proxy["folder"] != final else join(qc_inbox(collection), proxy["name"])
+        try:
+            if proxy["folder"] != final:
+                _copy(share_path(source), target)
+            clip["files"]["proxy"] = file_entry(final, proxy["name"], "QC")
+            if callback := ctx.get("checkpoint"):
+                callback()
+            _remove_source(share_path(original_proxy).absolute(), target)
+        except (OSError, ValueError, MasterBlocked) as exc:
+            raise DeliveryBlocked(f"Proxy-Auslieferung fehlgeschlagen: {exc}") from exc
         master = clip["files"]["master"]
-        if master and not master.get("deleted_at") and master["source"] != ingest_source:  # Ingested masters are kept.
+        if not cfg.get("keep_old_master", False) and master and not master.get("deleted_at") and master["source"] != ingest_source:  # Ingested masters are kept.
             remove_tree(master["folder"], ctx, "Master nicht löschbar (bleiben liegen)")
             if not share_path(master["folder"]).exists():
                 master["deleted_at"] = now()
@@ -132,27 +159,30 @@ def _apply_report(clip: dict, job: dict, report: dict, worker: str | None, ctx: 
         return (f"stage={label}, job_id={job['id']}, worker={worker or 'unbekannt'}, "
                 f"attempts={clip['attempts']}, result={result}")
 
-    clip["job"] = None
-    if status == "rejected" and stage != "qc":
+    if status == "rejected" and stage not in ("qc", "transcode"):
         status = "failed"
     if status == "ok":
         add_event(clip, f"{label}-Job fertig", by + (f", Preset {report['preset']}" if report.get("preset") else ""))
         try:
             problem = _take_outputs(clip, job, report, ctx)
         except DeliveryBlocked as exc:
+            clip["job"] = None
             category = master_blocked if isinstance(exc, MasterBlocked) else delivery_blocked
             set_issue(clip, "sticky", category, job_text(str(exc)))
             add_event(clip, category, str(exc))
             return blocked_outcome, f"Marathon: {exc}", _finish_output(job, True, ctx)
         if problem is None:
+            clip["job"] = None
             clip["attempts"] = 0
             return "ok", result, _finish_output(job, True, ctx)
         status, result, report_result = "failed", problem, f"Marathon: {problem}"
     else:
         report_result = result
+    clip["job"] = None
     if status == "rejected":
-        set_issue(clip, "sticky", qc_rejected, job_text(result))
-        add_event(clip, qc_rejected, f"{by}: {result}")
+        category = qc_rejected if stage == "qc" else master_blocked
+        set_issue(clip, "sticky", category, job_text(result))
+        add_event(clip, category, f"{by}: {result}")
         return "rejected", report_result, _finish_output(job, True, ctx)
     clip["attempts"] += 1
     add_event(clip, f"{label}-Job fehlgeschlagen", f"{by}: {result}")

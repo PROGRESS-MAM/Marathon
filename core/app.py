@@ -17,6 +17,7 @@ from .priority import priority
 from .ffe import sync_references, update_ffe
 from .index import update_index
 from .jobs import process
+from .masters import cleanup_review
 from .cleanup import begin_delete, delete_folders
 from .report import report
 from .details import write_details
@@ -35,6 +36,8 @@ def _cycle() -> str | None:
     state, ctx = load_state(), context()
     if state.get("cleanup", {}).get("pending"):
         return "Bereinigung noch unvollständig; zuerst delete-folder erneut ausführen."
+    ctx["checkpoint"] = lambda: save_state(state)
+    cleanup_review(state, ctx)
     process(state, mapping, priority(mapping, state, ctx), ctx, writing=True, test_ids=test_job_ids())
     keep_notes(state, ctx["issues"])
     state["updated_at"] = now()

@@ -67,6 +67,12 @@ Ohne Fehler:
 
 Bei einem Fehler bleibt die JSON Version 7; der Fehlerbericht `reports/errors/transfer_<stempel>_errors.txt` nennt alle Gründe, bei Ordnern jeden betroffenen Ordner mit seinen Dateien. Scheitert das Entfernen eines Ordners trotz Prüfung, nennt er die bereits entfernten leeren Ordner.
 
+## Update auf 1.18.0
+
+- Geänderte Programmdateien und die neue `core/masters.py` in den bestehenden Marathon-Ordner kopieren; andere vorhandene Dateien und `state/marathon.json` nicht entfernen.
+- Bestehende JSON-Version 8 weiterverwenden; kein Transfer nötig.
+- Vor dem ersten Lauf `[ingest] keep_old_master = true` in der vorhandenen Konfiguration ergänzen, wenn die manuelle Vergleichsablage gewünscht ist.
+
 ## Start
 
 ~~~bash
@@ -230,18 +236,19 @@ Maßgeblich ist der Wert beim Erstellen des Jobs.
 **Prüfung nach Transcode:**
 
 - Proxy und gemeldeter neuer Master müssen vorhanden und größer als 0 Byte sein, Namen wie oben. Sonst gilt der Job als fehlgeschlagen: Teilergebnisse werden gelöscht, neuer Versuch bis `max_job_attempts`. Eine nicht gemeldete zweite Mediendatei zählt als zweiter Proxy und lässt den Job ebenfalls fehlschlagen.
-- Der neue Master wird nach `[ingest] master_dir` verschoben, nie überschrieben. Bei Namenskonflikt oder wenn das Verschieben nicht möglich ist, wird der Clip inaktiv (`Neuer Master blockiert`), der Ausgang archiviert, nichts gelöscht. Konflikt in `master_dir` lösen, dann `retry-transcode` (der Transcode läuft neu).
-- Danach verfolgt Marathon den neuen Master nicht weiter (nur History `Neuer Master abgelegt`); `delete-folder` ordnet ihn nicht wieder zu.
+- Der neue Master wird abhängig von `[ingest] keep_old_master` direkt nach `master_dir` oder in die Prüfungsablage verschoben, nie überschrieben. Bei Namenskonflikt oder wenn das Verschieben nicht möglich ist, wird der Clip inaktiv (`Neuer Master blockiert`), der Ausgang archiviert, nichts gelöscht. Konflikt in `master_dir` lösen, dann `retry-transcode` (der Transcode läuft neu).
+- Der aktuelle Ort des neuen Masters steht im jeweils letzten History-Eintrag `Neuer Master abgelegt`. Bei Verschiebungen durch Marathon wird ein neuer Ablageeintrag geschrieben. Sobald er final direkt in `master_dir` liegt, wird die Datei nicht mehr beobachtet. Die JSON-Struktur und JSON-Version 8 bleiben unverändert.
 
 **Nach QC:**
 
 | QC | Proxy | Master aus Restore | Neuer Master in `master_dir` | EditShare-Feld |
 | --- | --- | --- | --- | --- |
-| bestanden | in den Zielordner | sofort gelöscht | bleibt | wird gesetzt |
+| bestanden | in den Zielordner | bei `keep_old_master=false` gelöscht, bei `true` gesichert | bleibt final oder in der Prüfungsablage | wird gesetzt |
 | nicht bestanden | bleibt im QC-Eingang | bleibt | bleibt | – |
 
-- Reihenfolge bei bestandenem QC: Proxy ausliefern, Master aus Restore löschen, EditShare-Feld setzen. Masterdateien aus `ingest-master` werden nie gelöscht.
-- Vor der Auslieferung muss der Proxy vorhanden und größer als 0 Byte sein.
+- Bei `keep_old_master=false`: Proxy ausliefern, Master aus Restore löschen, EditShare-Feld setzen. Bei `true`: alten Master vollständig sichern, Proxy ausliefern, EditShare-Feld setzen. Originaldateien aus `ingest-master` werden weiterhin nicht gelöscht; für die Prüfungsablage werden sie kopiert.
+- Vor der Auslieferung muss der Proxy vorhanden und größer als 0 Byte sein. Nach bestätigter Zielkopie wird der neue Pfad gespeichert, erst danach die Quellkopie entfernt; unterbrochene QC-Auslieferungen können ohne neue JSON-Felder fortgesetzt werden.
+- Transcode-`rejected` (z. B. nicht kompatibler Master oder unsichere Analyse): direkt inaktiv mit manueller Fehlermeldung; kein automatischer weiterer Transcode-Versuch.
 - QC nicht bestanden: Clip inaktiv (`QC nicht bestanden`), Eintrag in der Fehlerliste des Berichts, Gründe im Detailbericht QC.
 - Zielordner enthält schon eine Datei mit dem Proxy-Namen: Clip inaktiv (`Auslieferung blockiert`), Proxy bleibt im QC-Eingang. Datei im Zielordner entfernen, dann `retry-qc` (der QC läuft neu, danach die Auslieferung).
 - Archiv: Job-Datei und Report liegen in `<work_dir>/<stufe>/archiv/`. Enthält der QC-Ausgang nur den Prüfbericht, liegt er dort als `<job_id>.aqc.json`; sonst wird der Ausgang als Ordner `…/<stufe>/archiv/<job_id>.ausgang` archiviert.
@@ -252,6 +259,46 @@ Maßgeblich ist der Wert beim Erstellen des Jobs.
 - Zugang über `cred_file`; der FLOW-Benutzer braucht Schreibrecht auf das Feld.
 - Scheitert das Setzen, bleibt eine offene Aufgabe in der JSON (`editshare`), und Marathon versucht es in jedem Job-Zyklus erneut. Ab 3 gescheiterten Zyklen steht der Clip im Bericht unter „EditShare-Feld nicht gesetzt“; er zählt weiter als bereit.
 - Proxys, die vor Version 1.10.0 ausgeliefert wurden, bekommen das Feld nicht nachträglich.
+
+## Master manuell überprüfen (`keep_old_master`)
+
+In die **vorhandene** `res/config.ini` im Abschnitt `[ingest]` ergänzen; den Abschnitt nicht doppelt anlegen:
+
+~~~ini
+[ingest]
+keep_old_master = true
+master_dir = \\10.0.77.11\Ablage KI Proxy_1\++ Master repariert
+~~~
+
+Die übrigen vorhandenen Einträge in `[ingest]` bleiben erhalten. Fehlt `keep_old_master`, gilt `false`. Nur `true` und `false` sind gültig. Vor dem ersten Lauf mit dem Update `true` eintragen, wenn alte Master behalten werden sollen.
+
+Bei `true`:
+
+~~~text
+++ Master repariert/
+  manuelle Überprüfung/
+    <Clipname ohne Dateiendung>/
+      alt/   sämtliche Dateien des alten Masters
+      neu/   neuer Master
+~~~
+
+- Der neue Master kommt nach erfolgreichem Transcode nach `neu`. Alte Master bleiben bis zum erfolgreichen QC verfügbar und kommen danach nach `alt`. QC prüft den Proxy; neue Master werden zusätzlich manuell verglichen.
+- Bei mehrteiligen alten Mastern werden erst sämtliche Dateien kopiert und anhand ihrer Inhalte bestätigt. Erst danach werden wiederhergestellte Arbeitskopien entfernt. Ingest-Originale bleiben bestehen.
+- Alte Master und Proxy behalten ihre vorhandenen Dateieinträge in der JSON; die Ablageorte werden bei Marathon-Verschiebungen aktualisiert. Neue Master nutzen die vorhandenen History-Ablageereignisse. Es gibt keine neuen JSON-Felder oder Statusmodelle.
+
+Bei `false` und laufender Job-Schleife:
+
+1. Im nächsten regulären Job-Zyklus alle Clipordner unter `manuelle Überprüfung` rekursiv prüfen.
+2. Alle Dateien unter `neu` direkt nach `master_dir` verschieben; verschachtelte `neu`-Unterordner werden flach aufgelöst.
+3. Erst nach bestätigter Übernahme der zugehörigen neuen Dateien alles unter `alt` löschen.
+4. Geleerte Clipordner und zuletzt `manuelle Überprüfung` entfernen.
+5. Für weitere Clips gilt die bisherige Logik: neuer Master direkt in `master_dir`, alte Restore-Master nach erfolgreicher QC löschen.
+
+Bereits angefangene Bereinigungen werden auch nach einem Neustart fortgesetzt. Bestehende Ziele werden nie überschrieben; identische, bestätigte Kopien einer unterbrochenen Übernahme können weiterverwendet werden. Namenskonflikte, veränderte Dateien, Verknüpfungen/Junctions, unerwartete Inhalte oder unklare Zuordnungen bleiben erhalten und werden als Fehler gemeldet. Beim erneuten Umschalten auf `true` werden Prüfungsordner bei Bedarf wieder angelegt und nicht bereinigt.
+
+Während Übernahme und Bereinigung Dateien nicht parallel manuell verändern.
+
+**Achtung:** `false` ist die ausdrückliche Freigabe zum automatischen Löschen der alten Master in dieser Prüfungsablage. Vorher den manuellen Vergleich abschließen. Ein finales Ablageereignis bleibt in der JSON erhalten, danach prüft Marathon diese neue Masterdatei nicht weiter.
 
 ## Detailberichte
 
@@ -502,6 +549,7 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 | ffe | list_file | FFE-Liste, Pfad relativ zum res-Ordner |
 | ffe | reference_image | Referenz-Screenshot im Ordner `reference_clip_dir`; Name auch auf dem SMB |
 | ffe | reference_clip_dir | Ordner im res-Ordner mit allen FFE-Filmtafel-Clips; nur `.mov` zählen als Clips, mindestens einer nötig; Name auch auf dem SMB |
+| ingest | keep_old_master | `true`: Prüfungsablage behalten; `false`: Prüfungsablage automatisch auflösen und alte Restore-Master nach QC löschen. Fehlender Eintrag: `false` |
 | ingest | master_dir | Ordner mit Masterdateien `<DEFA-ID>__<Titel>.<Endung>` (vollständiger Pfad, gleiches Netzlaufwerk wie `root_path`); `ingest-master` liest ihn, neue Master aus Transcode legt Marathon hier ab (ohne Überschreiben) |
 | ingest | proxy_dir | Ordner mit vorhandenen Proxys `<proxy_prefix>__<DEFA-ID>__<Titel>.mp4` (vollständiger Pfad, gleiches Netzlaufwerk wie `root_path`); nur `ingest-proxy` liest ihn |
 | ingest | proxy_prefix | Namensanfang der Proxys in `proxy_dir` (ohne das folgende `__`), z. B. `(c)PROGRESS__10Mbit` |
@@ -522,3 +570,13 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 - `reports/errors/test-qc_<stempel>_errors.txt` – von `test-qc` übersprungene Clips
 - `reports/transfer_<stempel>.txt`, `reports/errors/transfer_<stempel>_errors.txt`, `state/backup/marathon.v7_<stempel>.json` – Bericht, Fehlerbericht und Sicherung des Transfer-Scripts
 - `test/test.json` – Stand des Test-Modus (offener Test-Lauf, IDs aller Test-Jobs); nicht löschen, solange Test-Jobs auf dem SMB liegen
+
+## Lokale Regressionstests
+
+Die Tests erzeugen ausschließlich temporäre lokale Testdateien; keine Produktionsablage und keine Zugangsdaten werden verwendet. Im jeweiligen Repository starten:
+
+```bash
+python -m unittest discover -s tests -v
+```
+
+Externe Anbindungen werden in den Tests ersetzt; die Tests greifen nicht auf EditShare, Veritone oder die SMB-Ablage zu.
