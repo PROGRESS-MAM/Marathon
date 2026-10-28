@@ -1,12 +1,13 @@
-"""Master review folders, safe transfers and location updates in the existing JSON history."""
+"""Master review folders, moves on the share and location updates in the existing JSON history."""
 # --------- IMPORTS ---------
 from pathlib import Path
-import hashlib
 import os
+import shutil
 import stat
 import unicodedata
 
 from .config import cfg
+from .console import log
 from .constants import ingest_source, invalid_path_chars, master_blocked, reserved_names
 from .layout import share_path
 from .share import MasterBlocked, safe_work_path
@@ -16,7 +17,7 @@ from .util import issue, now
 
 # --------- CONFIG ---------
 app_name = "Marathon Masterablage"
-app_version = "1.18.0"
+app_version = "1.18.1"
 review_name = "manuelle Überprüfung"
 new_event = "Neuer Master abgelegt"
 old_origin_event = "Alter Master ursprünglich"
@@ -68,107 +69,97 @@ def _checkpoint(ctx: dict) -> None:
 
 
 # --------- FUNC TRANSFER ---------
-def _signature(path: Path) -> tuple[int, int]:
+def _size(path: Path) -> int:
     info = _safe(path).lstat()
     if not stat.S_ISREG(info.st_mode):
         raise MasterBlocked(f"Keine reguläre Datei: {path}")
-    return info.st_size, info.st_ino
+    return info.st_size
 
 
-def _digest(path: Path) -> str:
-    digest = hashlib.sha256()
-    with _safe(path).open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
+def _existing(target: Path) -> Path | None:
+    """Entry with the target name in any case; None if the folder or entry does not exist."""
+    if not target.parent.is_dir():
+        return None
+    return next((item for item in target.parent.iterdir() if item.name.casefold() == target.name.casefold()), None)
 
 
-def _same(source: Path, target: Path) -> bool:
-    before = _signature(source)
-    source_hash = _digest(source)
-    after = _signature(source)
-    return (_signature(target)[0] == before[0] and source_hash == _digest(target) == _digest(source)
-            and after == before)
-
-
-def _copy(source: Path, target: Path) -> None:
-    source, target = _safe(source), _safe(target)
-    before = _signature(source)
-    if before[0] == 0:
-        raise MasterBlocked(f"Leere Masterdatei: {source}")
-    target.parent.mkdir(parents=True, exist_ok=True)
-    clashes = [item for item in target.parent.iterdir() if item.name.casefold() == target.name.casefold()]
-    if clashes:
-        if len(clashes) == 1 and clashes[0].name == target.name and _same(source, target):
-            return  # A verified earlier copy can be resumed without overwriting.
-        raise MasterBlocked(f"Namenskonflikt: {target}; Quelle bleibt erhalten")
-    created = False
-    try:
-        with source.open("rb") as reader, target.open("xb") as writer:
-            created = True
-            for chunk in iter(lambda: reader.read(1024 * 1024), b""):
-                writer.write(chunk)
-            writer.flush()
-            os.fsync(writer.fileno())
-        if _signature(source) != before or not _same(source, target):
-            raise MasterBlocked(f"Kopie nicht bestätigt: {source} → {target}")
-    except BaseException:
-        if created:
-            target.unlink(missing_ok=True)
-        raise
-
-
-def _remove_source(source: Path, target: Path) -> None:
-    if source != target and os.path.lexists(source):
-        if not _same(source, target):
-            raise MasterBlocked(f"Quelle geändert; nicht gelöscht: {source}")
+def _rename(source: Path, target: Path) -> None:
+    if os.name == "nt":
+        os.rename(source, target)  # Windows refuses an existing target; on one share the server moves the data.
+    else:
+        os.link(source, target)  # POSIX rename would overwrite; a hard link refuses an existing target.
         source.unlink()
 
 
-def store_new_master(clip: dict, relative: str, name: str, ctx: dict) -> Path:
-    """Store a generated master, record its location, then remove the verified source copy."""
+def _check_target(target: Path) -> None:
+    if _existing(target):
+        raise MasterBlocked(f"Namenskonflikt: {target}; Quelle bleibt erhalten")
+
+
+def _place(source: Path, target: Path) -> None:
+    """Move a file on the share without reading its content; never overwrite."""
+    source, target = _safe(source), _safe(target)
+    size = _size(source)
+    if not size:
+        raise MasterBlocked(f"Leere Masterdatei: {source}")
+    _check_target(target)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _rename(source, target)
+    if _size(target) != size:
+        raise MasterBlocked(f"Verschieben nach {target} konnte nicht bestätigt werden")
+
+
+def _copy_kept(source: Path, target: Path) -> None:
+    """Copy a file whose original must stay (ingest): read once, check the size, publish under the final name."""
+    source, target = _safe(source), _safe(target)
+    size = _size(source)
+    if found := _existing(target):
+        if found.name == target.name and _size(found) == size:
+            return  # Complete copy of an earlier, interrupted run.
+        raise MasterBlocked(f"Namenskonflikt: {target}; Original bleibt erhalten")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    part = _safe(target.with_name(f".{target.name}.part"))
+    log(f"Kopiere Ingest-Master: {source.name} ({size / 1e9:.1f} GB)")
+    try:
+        shutil.copyfile(source, part)  # Overwrites a leftover part file of an interrupted copy.
+        if _size(part) != size:
+            raise MasterBlocked(f"Kopie unvollständig: {part}")
+        _rename(part, target)
+    finally:
+        part.unlink(missing_ok=True)
+
+
+def new_master_target(clip: dict, name: str) -> Path:
+    """Storage path of a new master for the current keep_old_master setting."""
     folder = review_folder(clip) / "neu" if cfg.get("keep_old_master", False) else _root()
-    target = _safe(folder / name)
+    return _safe(folder / name)
+
+
+def store_new_master(clip: dict, relative: str, name: str, ctx: dict) -> Path:
+    """Move a generated master; the location is recorded before the move, so a restart can finish it."""
+    target = new_master_target(clip, name)
     source = safe_work_path(relative).absolute()
-    recorded = new_master_path(clip)
-    if not os.path.lexists(source):
-        if recorded == target and _signature(target)[0] > 0:
-            return target
+    if os.path.lexists(source) and new_master_path(clip) == target and target.is_file() and _size(target) == _size(source):
+        source.unlink()  # 1.18.0 recorded the location only after a verified copy; the work copy is left over.
+    elif os.path.lexists(source):
+        _check_target(target)
+        if new_master_path(clip) != target:
+            add_event(clip, new_event, str(target))
+            _checkpoint(ctx)
+        _place(source, target)
+    elif new_master_path(clip) != target or not target.is_file() or not _size(target):
         raise MasterBlocked(f"Neuer Master fehlt: {source}")
-    _copy(source, target)
-    if recorded != target:
-        add_event(clip, new_event, str(target))
-    _checkpoint(ctx)
-    _remove_source(source, target)
     return target
 
 
-def _finish_old_sources(clip: dict, archived: Path) -> None:
-    master = clip["files"]["master"]
-    origin = _last_path(clip, old_origin_event)
-    if not origin or master["source"] == ingest_source or origin == archived:
-        return
-    origin = safe_work_path(origin.relative_to(Path(cfg["root_path"]).absolute()).as_posix()).absolute()
-    for name in master["names"]:
-        _remove_source(origin / name, archived / name)
-    try:
-        origin.rmdir()
-    except OSError:
-        pass
-
-
 def archive_old_master(clip: dict, ctx: dict) -> None:
-    """Keep all source master files after QC; ingested originals are copied, never removed."""
+    """Move all old master files into alt after QC; ingested originals are copied and kept."""
     master = clip["files"]["master"]
     if not master or master.get("deleted_at"):
         return
     target = _safe(review_folder(clip) / "alt")
     source = _safe(share_path(master["folder"]))
     if source == target:
-        for name in master["names"]:
-            if _signature(target / name)[0] == 0:
-                raise MasterBlocked(f"Gesicherte Masterdatei leer: {target / name}")
-        _finish_old_sources(clip, target)
         return
     names = master["names"]
     if len({name.casefold() for name in names}) != len(names):
@@ -176,25 +167,34 @@ def archive_old_master(clip: dict, ctx: dict) -> None:
     for name in names:
         if Path(name).name != name or any(char in invalid_path_chars for char in name):
             raise MasterBlocked(f"Unsicherer Masterdateiname: {name!r}")
-        _signature(source / name)
+    kept = master["source"] == ingest_source
     for name in names:
-        _copy(source / name, target / name)
+        if kept:
+            _copy_kept(source / name, target / name)
+        elif os.path.lexists(source / name):
+            _place(source / name, target / name)
+        elif not (target / name).is_file():  # Moved by an interrupted run.
+            raise MasterBlocked(f"Alte Masterdatei fehlt: {source / name}")
     add_event(clip, old_origin_event, str(source))
     master.update(folder=str(target), last_seen_at=now())
     add_event(clip, "Alter Master gesichert", str(target))
     _checkpoint(ctx)
-    _finish_old_sources(clip, target)
+    if not kept:
+        try:
+            source.rmdir()
+        except OSError:
+            pass  # Not empty or already gone.
 
 
 # --------- FUNC REVIEW CLEANUP ---------
-def _inventory(folder: Path) -> dict[Path, tuple[int, int, int, str]]:
+def _inventory(folder: Path) -> dict[Path, tuple[int, int]]:
     result, pending = {}, [folder]
     while pending:
         path = _safe(pending.pop())
         info = path.lstat()
         if not (stat.S_ISREG(info.st_mode) or stat.S_ISDIR(info.st_mode)):
             raise MasterBlocked(f"Unbekannter Dateityp: {path}")
-        result[path] = (info.st_mode, info.st_size, info.st_ino, _digest(path) if stat.S_ISREG(info.st_mode) else "")
+        result[path] = (info.st_mode, info.st_size if stat.S_ISREG(info.st_mode) else 0)
         if stat.S_ISDIR(info.st_mode):
             pending.extend(path.iterdir())
     return result
@@ -223,8 +223,7 @@ def _delete_old(folder: Path, expected: dict | None = None) -> None:
         raise MasterBlocked(f"Prüfungsablage verändert: {folder}")
     for path, expected in sorted(snapshot.items(), key=lambda item: len(item[0].parts), reverse=True):
         info = _safe(path).lstat()
-        current = (info.st_mode, info.st_size, info.st_ino, _digest(path) if stat.S_ISREG(info.st_mode) else "")
-        if (current != expected if stat.S_ISREG(info.st_mode) else (current[0], current[2]) != (expected[0], expected[2])):
+        if (info.st_mode, info.st_size if stat.S_ISREG(info.st_mode) else 0) != expected:
             raise MasterBlocked(f"Datei/Ordner verändert; nicht gelöscht: {path}")
         if stat.S_ISDIR(info.st_mode):
             path.rmdir()
@@ -267,7 +266,7 @@ def cleanup_review(state: dict, ctx: dict) -> None:
                 targets[key] = source
                 target = destination / source.name
                 clashes = [item for item in destination.iterdir() if item.name.casefold() == key]
-                if clashes and (len(clashes) != 1 or clashes[0].name != source.name or not _same(source, target)):
+                if clashes:
                     raise MasterBlocked(f"Namenskonflikt im Master-Ziel: {target}")
         if snapshot != _inventory(root):
             raise MasterBlocked("Prüfungsablage während der Vorprüfung verändert")
@@ -279,11 +278,10 @@ def cleanup_review(state: dict, ctx: dict) -> None:
         try:
             for source in sorted(record["new"]):
                 target = destination / source.name
-                _copy(source, target)
                 if clip and new_master_path(clip) == source:
                     add_event(clip, new_event, str(target))
-                _checkpoint(ctx)
-                _remove_source(source, target)
+                    _checkpoint(ctx)
+                _place(source, target)
             location = new_master_path(clip) if clip else None
             if location and location.is_relative_to(group):
                 target = destination / location.name
@@ -293,10 +291,6 @@ def cleanup_review(state: dict, ctx: dict) -> None:
                 _checkpoint(ctx)
             if not clip and not record["new"] and os.path.lexists(group / "alt"):
                 raise MasterBlocked(f"Keine Zuordnung/Übernahmebestätigung für alte Master: {group}")
-            if clip and clip["files"]["master"]:
-                master = clip["files"]["master"]
-                if share_path(master["folder"]).absolute() == group / "alt":
-                    _finish_old_sources(clip, group / "alt")
             _delete_old(group / "alt", record["old"])
             if clip and clip["files"]["master"]:
                 master = clip["files"]["master"]

@@ -34,7 +34,7 @@ from .share import (
     remove_tree, retire_job, rmdir, running, scan, write_text_atomic)
 from . import restore
 from .state import add_event, enter, file_entry, set_issue
-from .masters import _copy, _remove_source, archive_old_master, new_master_path, store_new_master
+from .masters import archive_old_master, new_master_path, new_master_target, store_new_master
 from .naming import defa_id, proxy_name
 from .ffe import reference_clips, reference_image, sync_references
 from .editshare import request_field, write_fields
@@ -89,10 +89,13 @@ def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
     delivered = {key: name for key, (name, size) in scan(out).items() if size and not key.endswith(busy_suffixes)}
     if stage == "transcode":
         new_master = str(report.get("new_master") or "").strip()
-        recorded = new_master_path(clip)
-        resumed_master = bool(new_master and new_master.casefold() not in delivered
-                              and recorded and recorded.name == new_master
-                              and recorded.is_file() and recorded.stat().st_size > 0)
+        resumed_master = False
+        if new_master and new_master.casefold() not in delivered:
+            try:  # Moved by an interrupted run: location recorded before the move.
+                target = new_master_target(clip, new_master)
+                resumed_master = new_master_path(clip) == target and target.is_file() and target.stat().st_size > 0
+            except MasterBlocked:
+                resumed_master = False
         if new_master and (problem := _master_problem(clip, new_master, delivered)) and not resumed_master:
             return problem
         proxies = [name for key, name in delivered.items() if not key.endswith(protocol_suffixes) and key != new_master.casefold()]
@@ -120,24 +123,19 @@ def _take_outputs(clip: dict, job: dict, report: dict, ctx: dict) -> str | None:
     else:
         proxy, final = clip["files"]["proxy"], final_folder(collection)
         source = f"{proxy['folder']}/{proxy['name']}"
-        if not share_path(source).is_file() or not share_path(source).stat().st_size:
+        target = share_path(join(final, proxy["name"]))
+        # Delivered by an interrupted run: the proxy is a rename, so it is either here or there.
+        done = proxy["folder"] == final or (not share_path(source).exists() and target.is_file() and target.stat().st_size > 0)
+        if not done and (not share_path(source).is_file() or not share_path(source).stat().st_size):
             return f"Proxy {source} vor der Auslieferung nicht vorhanden oder leer"
         if cfg.get("keep_old_master", False):
             try:
                 archive_old_master(clip, ctx)
             except (OSError, ValueError) as exc:
                 raise MasterBlocked(f"Sicherung des alten Masters fehlgeschlagen: {exc}") from exc
-        target = share_path(join(final, proxy["name"])).absolute()
-        original_proxy = source if proxy["folder"] != final else join(qc_inbox(collection), proxy["name"])
-        try:
-            if proxy["folder"] != final:
-                _copy(share_path(source), target)
-            clip["files"]["proxy"] = file_entry(final, proxy["name"], "QC")
-            if callback := ctx.get("checkpoint"):
-                callback()
-            _remove_source(share_path(original_proxy).absolute(), target)
-        except (OSError, ValueError, MasterBlocked) as exc:
-            raise DeliveryBlocked(f"Proxy-Auslieferung fehlgeschlagen: {exc}") from exc
+        if not done:
+            deliver_proxy(source, final, proxy["name"])
+        clip["files"]["proxy"] = file_entry(final, proxy["name"], "QC")
         master = clip["files"]["master"]
         if not cfg.get("keep_old_master", False) and master and not master.get("deleted_at") and master["source"] != ingest_source:  # Ingested masters are kept.
             remove_tree(master["folder"], ctx, "Master nicht löschbar (bleiben liegen)")

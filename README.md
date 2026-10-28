@@ -67,6 +67,12 @@ Ohne Fehler:
 
 Bei einem Fehler bleibt die JSON Version 7; der Fehlerbericht `reports/errors/transfer_<stempel>_errors.txt` nennt alle Gründe, bei Ordnern jeden betroffenen Ordner mit seinen Dateien. Scheitert das Entfernen eines Ordners trotz Prüfung, nennt er die bereits entfernten leeren Ordner.
 
+## Update auf 1.18.1
+
+- Nur `core/masters.py`, `core/jobs.py` und `core/__init__.py` ersetzen; Konfiguration und JSON bleiben unverändert.
+- Behebt die hohe Netzlast von 1.18.0: Dateien werden wieder auf der Freigabe verschoben statt kopiert und mehrfach gelesen.
+- Unvollständige Kopien aus 1.18.0 vor dem Start entfernen (siehe Hinweis im Update).
+
 ## Update auf 1.18.0
 
 - Geänderte Programmdateien und die neue `core/masters.py` in den bestehenden Marathon-Ordner kopieren; andere vorhandene Dateien und `state/marathon.json` nicht entfernen.
@@ -247,7 +253,7 @@ Maßgeblich ist der Wert beim Erstellen des Jobs.
 | nicht bestanden | bleibt im QC-Eingang | bleibt | bleibt | – |
 
 - Bei `keep_old_master=false`: Proxy ausliefern, Master aus Restore löschen, EditShare-Feld setzen. Bei `true`: alten Master vollständig sichern, Proxy ausliefern, EditShare-Feld setzen. Originaldateien aus `ingest-master` werden weiterhin nicht gelöscht; für die Prüfungsablage werden sie kopiert.
-- Vor der Auslieferung muss der Proxy vorhanden und größer als 0 Byte sein. Nach bestätigter Zielkopie wird der neue Pfad gespeichert, erst danach die Quellkopie entfernt; unterbrochene QC-Auslieferungen können ohne neue JSON-Felder fortgesetzt werden.
+- Vor der Auslieferung muss der Proxy vorhanden und größer als 0 Byte sein. Er wird auf der Freigabe verschoben, nicht kopiert; eine unterbrochene Auslieferung wird beim nächsten Zyklus erkannt und abgeschlossen.
 - Transcode-`rejected` (z. B. nicht kompatibler Master oder unsichere Analyse): direkt inaktiv mit manueller Fehlermeldung; kein automatischer weiterer Transcode-Versuch.
 - QC nicht bestanden: Clip inaktiv (`QC nicht bestanden`), Eintrag in der Fehlerliste des Berichts, Gründe im Detailbericht QC.
 - Zielordner enthält schon eine Datei mit dem Proxy-Namen: Clip inaktiv (`Auslieferung blockiert`), Proxy bleibt im QC-Eingang. Datei im Zielordner entfernen, dann `retry-qc` (der QC läuft neu, danach die Auslieferung).
@@ -283,7 +289,8 @@ Bei `true`:
 ~~~
 
 - Der neue Master kommt nach erfolgreichem Transcode nach `neu`. Alte Master bleiben bis zum erfolgreichen QC verfügbar und kommen danach nach `alt`. QC prüft den Proxy; neue Master werden zusätzlich manuell verglichen.
-- Bei mehrteiligen alten Mastern werden erst sämtliche Dateien kopiert und anhand ihrer Inhalte bestätigt. Erst danach werden wiederhergestellte Arbeitskopien entfernt. Ingest-Originale bleiben bestehen.
+- Neue Master, alte Restore-Master und Proxys werden auf der Freigabe verschoben, ohne Dateiinhalte zu lesen; vorhandene Ziele werden nie überschrieben. Nur Ingest-Master werden kopiert (einmal gelesen, Größe geprüft), weil ihre Originale bestehen bleiben; dabei meldet die Konsole „Kopiere Ingest-Master …“. Ein unterbrochener Lauf wird beim nächsten Zyklus fortgesetzt.
+- `master_dir` und `root_path` müssen auf derselben Freigabe liegen, sonst ist kein Verschieben ohne Datenübertragung möglich und Marathon meldet den Clip als blockiert.
 - Alte Master und Proxy behalten ihre vorhandenen Dateieinträge in der JSON; die Ablageorte werden bei Marathon-Verschiebungen aktualisiert. Neue Master nutzen die vorhandenen History-Ablageereignisse. Es gibt keine neuen JSON-Felder oder Statusmodelle.
 
 Bei `false` und laufender Job-Schleife:
@@ -294,7 +301,7 @@ Bei `false` und laufender Job-Schleife:
 4. Geleerte Clipordner und zuletzt `manuelle Überprüfung` entfernen.
 5. Für weitere Clips gilt die bisherige Logik: neuer Master direkt in `master_dir`, alte Restore-Master nach erfolgreicher QC löschen.
 
-Bereits angefangene Bereinigungen werden auch nach einem Neustart fortgesetzt. Bestehende Ziele werden nie überschrieben; identische, bestätigte Kopien einer unterbrochenen Übernahme können weiterverwendet werden. Namenskonflikte, veränderte Dateien, Verknüpfungen/Junctions, unerwartete Inhalte oder unklare Zuordnungen bleiben erhalten und werden als Fehler gemeldet. Beim erneuten Umschalten auf `true` werden Prüfungsordner bei Bedarf wieder angelegt und nicht bereinigt.
+Bereits angefangene Bereinigungen werden auch nach einem Neustart fortgesetzt. Bestehende Ziele werden nie überschrieben. Namenskonflikte, veränderte Dateien, Verknüpfungen/Junctions, unerwartete Inhalte oder unklare Zuordnungen bleiben erhalten und werden als Fehler gemeldet. Beim erneuten Umschalten auf `true` werden Prüfungsordner bei Bedarf wieder angelegt und nicht bereinigt.
 
 Während Übernahme und Bereinigung Dateien nicht parallel manuell verändern.
 
