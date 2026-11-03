@@ -14,7 +14,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 # Number of calendar days to include; None processes every matching report.
-TAGE = 7
+TAGE = None
 REPO_ROOT = Path(__file__).resolve().parent
 STATE_PATH = REPO_ROOT / "state" / "marathon.json"
 
