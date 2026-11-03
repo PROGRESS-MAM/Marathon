@@ -20,7 +20,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 # Number of calendar days to include; None processes every matching report.
-TAGE = 7
+TAGE = None
 
 TRANSCODE_REPORT_NAME = re.compile(
     r"details_transcode_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{6}\.txt"
