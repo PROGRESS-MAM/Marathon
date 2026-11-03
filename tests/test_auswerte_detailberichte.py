@@ -1,10 +1,16 @@
+from collections import Counter
 from datetime import date, timedelta
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import auswerte_detailberichte as analyzer
+
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+FIXTURE = REPO_ROOT / "tests/fixtures/details_transcode_2026-10-30_09-00-07-352001.txt"
 
 
 REPORT = """Marathon 1.18.3 · Detailbericht Transcode
@@ -45,6 +51,8 @@ def test_parses_failure_blocks_and_categories():
     assert cases[0].collection == "Demo"
     assert cases[0].category == "transcode_output_contract"
     assert cases[1].category == "worker_failed"
+    assert cases[1].result == "Worker: manuelle Prüfung nötig"
+
 
     qc_report = REPORT.replace("Detailbericht Transcode", "Detailbericht QC").replace(
         "Marathon: Transcode-Ausgang enthält 2 Proxy-Dateien statt einer",
@@ -52,6 +60,36 @@ def test_parses_failure_blocks_and_categories():
     )
     assert analyzer.parse_cases(qc_report, "qc")[0].category == "qc_rejected"
     assert analyzer.normalize_category_text("clip_id 4711 had 2 proxy files") == "clip_id <id> had <number> proxy files"
+    normalized = analyzer.normalize_category_text(
+        "Kanal 3 trust 0.91 < 0.90; data, data, data"
+    )
+    assert normalized == "kanal <number> trust <decimal> < <decimal>; <repeated-data>"
+
+
+
+def test_real_report_fixture_parses_all_rejected_jobs_and_categories():
+    report = analyzer.parse_report(FIXTURE, FIXTURE.read_text(encoding="utf-8"))
+    cases = analyzer.collect_cases([report])
+    counts = Counter(case.category for case in cases)
+
+    assert analyzer.TAGE == 7
+    assert len(cases) == 384
+    assert all(case.status == "REJECTED" for case in cases)
+    assert len({case.job_id for case in cases}) == 384
+    assert sum(count > 1 for count in Counter(case.clip_id for case in cases).values()) == 15
+    assert all(case.result.startswith("Manuelle Prüfung:") for case in cases)
+    assert {case.extra_info for case in cases} == {"Prüfbericht fehlt"}
+    assert counts == {
+        "audio_channel_uncertain": 170,
+        "audio_source_without_tone": 91,
+        "source_streams_not_transferable": 58,
+        "audio_channel_not_duplicate": 49,
+        "audio_duplicate_uncertain": 7,
+        "no_audible_audio_channel": 5,
+        "missing_ffe_test_card": 3,
+        "interlacing_uncertain": 1,
+    }
+    assert analyzer.date_in_window(report, analyzer.TAGE, date(2026, 11, 3))
 
 
 def test_transcode_rejected_uses_archived_output_candidate():
@@ -142,10 +180,14 @@ def test_days_constant_and_none_include_all_reports(tmp_path, monkeypatch):
     assert "Pfad nicht ableitbar" in all_content
 
 
-def test_cli_runs_without_required_selector(tmp_path):
-    archive = tmp_path / "reports" / "archive"
-    write_report(archive, f"details_transcode_{date.today()}_09-00-00-000000.txt")
-    script = Path(__file__).resolve().parents[1] / "auswerte_detailberichte.py"
+def test_no_argument_cli_reads_fixture_archive_from_script_root(tmp_path):
+    repo = tmp_path / "repo"
+    archive = repo / "reports" / "archive"
+    archive.mkdir(parents=True)
+    script = repo / "auswerte_detailberichte.py"
+    shutil.copyfile(REPO_ROOT / "auswerte_detailberichte.py", script)
+    shutil.copyfile(FIXTURE, archive / FIXTURE.name)
+
     result = subprocess.run(
         [sys.executable, str(script)],
         cwd=tmp_path,
@@ -153,8 +195,13 @@ def test_cli_runs_without_required_selector(tmp_path):
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    content = (tmp_path / "auswertung_detailberichte.md").read_text(encoding="utf-8")
-    assert "Gelesene Berichte: 1" in content
+    content = (repo / "auswertung_detailberichte.md").read_text(encoding="utf-8")
+    case_lines = [line for line in content.splitlines() if "Clip-ID:" in line]
+    assert "Fehlerfälle gesamt: 384" in content
+    assert len(case_lines) == 384
+    assert all("Pfad:" in line and "Zusatzinfo: Prüfbericht fehlt" in line for line in case_lines)
+    assert not (tmp_path / "auswertung_detailberichte.md").exists()
+
 
 
 def test_only_matching_transcode_reports_are_opened(tmp_path, monkeypatch):

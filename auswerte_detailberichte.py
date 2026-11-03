@@ -20,7 +20,8 @@ from datetime import date, timedelta
 from pathlib import Path
 
 # Number of calendar days to include; None processes every matching report.
-TAGE = None
+TAGE = 7
+REPO_ROOT = Path(__file__).resolve().parent
 
 TRANSCODE_REPORT_NAME = re.compile(
     r"details_transcode_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{6}\.txt"
@@ -35,6 +36,8 @@ DATE_IN_NAME = re.compile(r"_(\d{4}-\d{2}-\d{2})_")
 DATE_IN_TEXT = re.compile(r"Zeitraum\s+(.+?)\s+(?:–|—|-)\s+(.+?)\s*$", re.I)
 DATE_VALUE = re.compile(r"\d{4}-\d{2}-\d{2}")
 VARIABLES = (
+    (re.compile(r"\bdata(?:\s*,\s*data)+\b", re.I), "<repeated-data>"),
+    (re.compile(r"\b\d+(?:[.,]\d+)\b"), "<decimal>"),
     (re.compile(r"\b\d{8}T\d{6}\d+\b", re.I), "<job-time>"),
     (re.compile(r"\bclip_id\s*\d+\b", re.I), "clip_id <id>"),
     (re.compile(r"\b(?:clip|id|job)\s*#?\d+\b", re.I), "<identifier>"),
@@ -53,6 +56,7 @@ class ReportCase:
     collection: str = ""
     job_id: str = ""
     result: str = ""
+    extra_info: str = ""
     path: str = ""
     stage: str = ""
     category: str = ""
@@ -119,7 +123,12 @@ def parse_cases(text: str, stage: str) -> list[ReportCase]:
             if collection_match:
                 current.collection = collection_match.group(1).strip()
         current.job_id = fields.get("job", "").strip()
-        current.result = " ".join(fields.get(key, "") for key in ("ergebnis", "fehler", "ist", "info") if fields.get(key))
+        current.result = fields.get("ergebnis", "").strip()
+        current.extra_info = " ".join(
+            fields.get(key, "").strip()
+            for key in ("fehler", "ist", "info")
+            if fields.get(key)
+        )
         current.path = fields.get("ablage", "").strip()
         current.stage = stage
         current.category = categorize(current)
@@ -149,14 +158,45 @@ def parse_cases(text: str, stage: str) -> list[ReportCase]:
 
 
 def categorize(case: ReportCase) -> str:
-    text = normalize_category_text(f"{case.stage} {case.status} {case.title} {case.result}")
-    if any(term in text for term in ("restore", "tape", "prüfbericht fehlt", "prüfbericht fehlt", "größenabweich", "groessenabweich", "doppelte einträge", "fehlende datei")):
+    source = case.result or case.extra_info
+    text = normalize_category_text(source)
+    if "analyse audio" in text and "source hat keinen ton" in text:
+        return "audio_source_without_tone"
+    if "zusätzliche quellstreams" in text and "nicht sicher übertragbar" in text:
+        return "source_streams_not_transferable"
+    if "ton unsicher" in text and "trust" in text:
+        return "audio_channel_uncertain"
+    if "hörbar und nicht doppelt" in text:
+        return "audio_channel_not_duplicate"
+    if "dublette mit kanal" in text:
+        return "audio_duplicate_uncertain"
+    if "kein hörbarer kanal" in text:
+        return "no_audible_audio_channel"
+    if "keine ffe-tafel" in text:
+        return "missing_ffe_test_card"
+    if "interlacing unsicher" in text:
+        return "interlacing_uncertain"
+
+    # Preserve the previous fallbacks for formats without a usable result field.
+    if not case.result:
+        text = normalize_category_text(
+            f"{case.stage} {case.status} {case.title} {case.extra_info}"
+        )
+    if any(term in text for term in (
+        "restore", "tape", "prüfbericht fehlt", "prüfbericht fehlt",
+        "größenabweich", "groessenabweich", "doppelte einträge", "fehlende datei",
+    )):
         return "restore_incomplete"
-    if any(term in text for term in ("proxy", "mastername", "master name", "proxy-datei", "proxy-dateien", "ausgang enthält", "ausgang enthaelt")):
+    if any(term in text for term in (
+        "proxy", "mastername", "master name", "proxy-datei", "proxy-dateien",
+        "ausgang enthält", "ausgang enthaelt",
+    )):
         return "transcode_output_contract"
     if case.stage == "qc" or any(term in text for term in ("aqc", "kriterium", "stream", "kanal")):
         return "qc_rejected"
-    if case.status == "BLOCKIERT" or any(term in text for term in ("kollision", "ablage", "ausliefer", "master")):
+    if case.status == "BLOCKIERT" or any(term in text for term in (
+        "kollision", "ablage", "ausliefer", "master",
+    )):
         return "delivery_or_master_blocked"
     return "worker_failed"
 
@@ -280,7 +320,14 @@ def write_summary(path: Path, reports: list[Report], cases: list[ReportCase]) ->
     if cases:
         for case in sorted(cases, key=lambda item: (item.category, item.job_id, item.title)):
             identifier = f"`{case.job_id}`" if case.job_id else "`Job-ID fehlt`"
-            lines.append(f"- {identifier} — `{case.category}` — Pfad: {format_case_path(case.path)}")
+            clip_id = f"`{case.clip_id}`" if case.clip_id else "`Clip-ID fehlt`"
+            line = (
+                f"- {identifier} — Clip-ID: {clip_id} — `{case.category}`"
+                f" — Pfad: {format_case_path(case.path)}"
+            )
+            if case.extra_info:
+                line += f" — Zusatzinfo: {case.extra_info}"
+            lines.append(line)
     else:
         lines.append("- Keine Fehlerfälle gefunden.")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -289,8 +336,18 @@ def write_summary(path: Path, reports: list[Report], cases: list[ReportCase]) ->
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Transcode-Detailberichte aus reports/archive zusammenfassen.")
-    parser.add_argument("--archiv", type=Path, default=Path("reports/archive"), help="Archivverzeichnis (Standard: reports/archive)")
-    parser.add_argument("--ausgabe", type=Path, default=Path("auswertung_detailberichte.md"), help="Zieldatei (Standard: auswertung_detailberichte.md)")
+    parser.add_argument(
+        "--archiv",
+        type=Path,
+        default=REPO_ROOT / "reports" / "archive",
+        help="Archivverzeichnis (Standard: reports/archive im Repo-Root)",
+    )
+    parser.add_argument(
+        "--ausgabe",
+        type=Path,
+        default=REPO_ROOT / "auswertung_detailberichte.md",
+        help="Zieldatei (Standard: auswertung_detailberichte.md im Repo-Root)",
+    )
     parser.add_argument("--leise", action="store_true", help="Fortschritts- und Warnmeldungen unterdrücken")
     return parser
 
