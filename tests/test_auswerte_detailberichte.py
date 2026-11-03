@@ -162,3 +162,55 @@ def test_cli_requires_exactly_one_selector(tmp_path):
     result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
     assert result.returncode != 0
     assert "one of the arguments --alle --tage is required" in result.stderr
+
+
+def test_cli_reports_progress_on_stderr(tmp_path):
+    archive = tmp_path / "archive"
+    write_report(archive, "details_transcode_2026-11-03_09-00-00-000000.txt")
+    output = tmp_path / "summary.md"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path(analyzer.__file__)),
+            "--alle",
+            "--archiv",
+            str(archive),
+            "--ausgabe",
+            str(output),
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout == ""
+    assert "Suchen:" in result.stderr
+    assert "Lesen [1/1] details_transcode_2026-11-03_09-00-00-000000.txt" in result.stderr
+    assert "Auswerten" in result.stderr
+    assert "Schreiben:" in result.stderr
+    assert "Fertig in " in result.stderr
+    assert "Berichte: 1" in result.stderr
+    assert "Fehlerfälle: 2" in result.stderr
+
+
+def test_cli_quiet_suppresses_progress_and_summary(tmp_path):
+    archive = tmp_path / "archive"
+    write_report(archive, "details_transcode_2026-11-03_09-00-00-000000.txt")
+    output = tmp_path / "summary.md"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(Path(analyzer.__file__)),
+            "--alle",
+            "--archiv",
+            str(archive),
+            "--ausgabe",
+            str(output),
+            "--leise",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert result.stdout == ""
+    assert result.stderr == ""
+    assert output.exists()

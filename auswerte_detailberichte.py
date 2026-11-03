@@ -10,8 +10,12 @@ suffix are not present in detail reports.
 """
 
 import argparse
+import os
 import re
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
+from collections import deque
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
@@ -189,19 +193,29 @@ def format_case_path(path: str) -> str:
     return f"`{path}`"
 
 
-def read_report(path: Path) -> Report | None:
+def read_report_text(path: Path) -> tuple[str | None, str | None]:
     try:
         text = path.read_text(encoding="utf-8")
     except (OSError, UnicodeError) as error:
-        print(f"Warnung: Bericht nicht lesbar, übersprungen: {path.name} ({error})", file=sys.stderr)
-        return None
+        return None, f"Warnung: Bericht nicht lesbar, übersprungen: {path.name} ({error})"
     if not text.strip():
-        print(f"Warnung: leeren Bericht übersprungen: {path.name}", file=sys.stderr)
-        return None
+        return None, f"Warnung: leeren Bericht übersprungen: {path.name}"
+    return text, None
+
+
+def parse_report(path: Path, text: str) -> Report:
     start, end = report_dates(text)
     report_date = report_filename_date(path) or start
     stage = extract_stage(path, text)
     return Report(path, parse_cases(text, stage), start, end, report_date)
+
+
+def read_report(path: Path) -> Report | None:
+    text, warning = read_report_text(path)
+    if warning:
+        print(warning, file=sys.stderr)
+        return None
+    return parse_report(path, text)
 
 
 def normalize_category_text(text: str) -> str:
@@ -277,25 +291,105 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def discover_reports(archive: Path) -> tuple[list[Path], str | None]:
+    try:
+        with os.scandir(archive) as entries:
+            paths = [
+                Path(entry.path)
+                for entry in entries
+                if entry.name.startswith("details_")
+                and entry.name.endswith(".txt")
+                and entry.is_file()
+            ]
+    except OSError as error:
+        return [], f"Warnung: Archivverzeichnis nicht gefunden: {archive} ({error})"
+    paths.sort(key=lambda path: path.name)
+    return paths, None
+
+
+def show_progress(quiet: bool, message: str) -> None:
+    if not quiet:
+        sys.stderr.write(f"\r{message}")
+        sys.stderr.flush()
+
+
+def finish_progress(quiet: bool) -> None:
+    if not quiet:
+        sys.stderr.write("\n")
+        sys.stderr.flush()
+
+
+def print_warning(quiet: bool, message: str) -> None:
+    if not quiet:
+        sys.stderr.write(f"\n{message}\n")
+        sys.stderr.flush()
+
+
+def load_reports(paths: list[Path], quiet: bool, days: int | None) -> tuple[list[Report], int]:
+    reports = []
+    failed_reports = 0
+    today = date.today()
+    if not paths:
+        return reports, failed_reports
+
+    worker_count = min(8, len(paths))
+    with ThreadPoolExecutor(max_workers=worker_count) as executor:
+        pending = deque()
+        next_path = 0
+        for _ in range(worker_count):
+            pending.append(executor.submit(read_report_text, paths[next_path]))
+            next_path += 1
+
+        for index, path in enumerate(paths, start=1):
+            show_progress(quiet, f"Lesen [{index}/{len(paths)}] {path.name}")
+            text, warning = pending.popleft().result()
+            if next_path < len(paths):
+                pending.append(executor.submit(read_report_text, paths[next_path]))
+                next_path += 1
+            if warning:
+                failed_reports += 1
+                print_warning(quiet, warning)
+                continue
+
+            show_progress(quiet, f"Auswerten [{index}/{len(paths)}] {path.name}")
+            report = parse_report(path, text)
+            if days is None or date_in_window(report, days, today):
+                reports.append(report)
+    finish_progress(quiet)
+    return reports, failed_reports
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
+    parser.add_argument("--leise", action="store_true", help="Fortschritts- und Warnmeldungen unterdrücken")
     args = parser.parse_args(argv)
     if args.tage is not None and args.tage < 1:
         parser.error("--tage muss mindestens 1 sein")
-    if not args.archiv.is_dir():
-        print(f"Warnung: Archivverzeichnis nicht gefunden: {args.archiv}", file=sys.stderr)
-        reports = []
-    else:
-        reports = []
-        for path in sorted(args.archiv.glob("details_*.txt")):
-            report = read_report(path)
-            if report is None:
-                continue
-            if args.tage is not None and not date_in_window(report, args.tage, date.today()):
-                continue
-            reports.append(report)
+
+    started = time.perf_counter()
+    show_progress(args.leise, f"Suchen: {args.archiv}")
+    paths, search_warning = discover_reports(args.archiv)
+    if search_warning:
+        print_warning(args.leise, search_warning)
+    show_progress(args.leise, f"Suchen: {len(paths)} Detailberichte gefunden")
+    finish_progress(args.leise)
+
+    reports, failed_reports = load_reports(paths, args.leise, args.tage)
+    show_progress(args.leise, "Auswerten: Fehlerfälle zusammenführen")
     cases = collect_cases(reports)
+    finish_progress(args.leise)
+
+    show_progress(args.leise, f"Schreiben: {args.ausgabe}")
     write_summary(args.ausgabe, reports, cases)
+    finish_progress(args.leise)
+
+    if not args.leise:
+        elapsed = time.perf_counter() - started
+        print(
+            f"Fertig in {elapsed:.2f}s — Berichte: {len(reports)}, "
+            f"Fehlerfälle: {len(cases)}, fehlerhafte Berichte: {failed_reports}",
+            file=sys.stderr,
+        )
     return 0
 
 
