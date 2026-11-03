@@ -1,9 +1,10 @@
-from collections import Counter
 from datetime import date, timedelta
+import json
 from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import auswerte_detailberichte as analyzer
@@ -11,7 +12,7 @@ import auswerte_detailberichte as analyzer
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = REPO_ROOT / "tests/fixtures/details_transcode_2026-10-30_09-00-07-352001.txt"
-
+MASTER_FOLDER = "DEFA/.marathon/DEFA Videoarchive B-Roll/transcode/eingang/415477"
 
 REPORT = """Marathon 1.18.3 · Detailbericht Transcode
 Zeitraum        2026-11-03 09:00:00 – 2026-11-03 10:00:00
@@ -44,7 +45,17 @@ def write_report(archive: Path, filename: str, text: str = REPORT) -> Path:
     return path
 
 
-def test_parses_failure_blocks_and_categories():
+def write_state(path: Path, clips) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schema_version": 8, "clips": clips}), encoding="utf-8")
+
+
+def state_clip(clip_id, folder=None):
+    master = {"folder": folder} if folder is not None else {}
+    return {"clip_id": clip_id, "files": {"master": master}}
+
+
+def test_parses_failure_blocks_and_german_categories():
     cases = analyzer.parse_cases(REPORT, "transcode")
     assert len(cases) == 2
     assert cases[0].clip_id == "4711"
@@ -52,193 +63,222 @@ def test_parses_failure_blocks_and_categories():
     assert cases[0].category == "transcode_output_contract"
     assert cases[1].category == "worker_failed"
     assert cases[1].result == "Worker: manuelle Prüfung nötig"
-
+    assert analyzer.CATEGORY_LABELS[cases[0].category] == "Transcode-Ausgabe fehlerhaft"
 
     qc_report = REPORT.replace("Detailbericht Transcode", "Detailbericht QC").replace(
         "Marathon: Transcode-Ausgang enthält 2 Proxy-Dateien statt einer",
-        "AQC Fehler Kriterium Audio",
+        "QC: stream_specs(video_1080p): bitrate nicht bestanden",
     )
     assert analyzer.parse_cases(qc_report, "qc")[0].category == "qc_rejected"
-    assert analyzer.normalize_category_text("clip_id 4711 had 2 proxy files") == "clip_id <id> had <number> proxy files"
-    normalized = analyzer.normalize_category_text(
-        "Kanal 3 trust 0.91 < 0.90; data, data, data"
+
+
+def test_clip_folder_index_supports_state_dict_list_and_numeric_ids():
+    by_id = analyzer.build_clip_folder_index({
+        "clips": {"415477": state_clip(415477, MASTER_FOLDER), "999": state_clip("999")}
+    })
+    assert by_id == {"415477": MASTER_FOLDER}
+
+    by_list = analyzer.build_clip_folder_index({
+        "clips": [state_clip("415477", MASTER_FOLDER), state_clip(888)]
+    })
+    assert by_list == {"415477": MASTER_FOLDER}
+
+
+def test_missing_clip_or_master_folder_uses_not_found_text():
+    report = analyzer.parse_report(Path("details_transcode_2026-11-03_09-00-00-000000.txt"), REPORT)
+    cases = analyzer.collect_cases([report], {"4711": MASTER_FOLDER})
+    assert cases[0].folder == MASTER_FOLDER
+    assert cases[1].folder == analyzer.MISSING_FOLDER
+
+    no_folder = analyzer.build_clip_folder_index({"clips": {"4712": state_clip("4712")}})
+    assert analyzer.collect_cases([report], no_folder)[1].folder == analyzer.MISSING_FOLDER
+
+
+def test_missing_marathon_json_warns_and_returns_empty_index(tmp_path):
+    folders, warning = analyzer.load_clip_folder_index(tmp_path / "marathon.json")
+    assert folders == {}
+    assert warning is not None
+    assert "marathon.json nicht gefunden" in warning
+
+
+def test_report_jobs_are_deduplicated(tmp_path):
+    first = analyzer.parse_report(
+        write_report(tmp_path, "details_transcode_2026-11-03_09-00-00-000000.txt"), REPORT
     )
-    assert normalized == "kanal <number> trust <decimal> < <decimal>; <repeated-data>"
-
-
-
-def test_real_report_fixture_parses_all_rejected_jobs_and_categories():
-    report = analyzer.parse_report(FIXTURE, FIXTURE.read_text(encoding="utf-8"))
-    cases = analyzer.collect_cases([report])
-    counts = Counter(case.category for case in cases)
-
-    assert analyzer.TAGE == 7
-    assert len(cases) == 384
-    assert all(case.status == "REJECTED" for case in cases)
-    assert len({case.job_id for case in cases}) == 384
-    assert sum(count > 1 for count in Counter(case.clip_id for case in cases).values()) == 15
-    assert all(case.result.startswith("Manuelle Prüfung:") for case in cases)
-    assert {case.extra_info for case in cases} == {"Prüfbericht fehlt"}
-    assert counts == {
-        "audio_channel_uncertain": 170,
-        "audio_source_without_tone": 91,
-        "source_streams_not_transferable": 58,
-        "audio_channel_not_duplicate": 49,
-        "audio_duplicate_uncertain": 7,
-        "no_audible_audio_channel": 5,
-        "missing_ffe_test_card": 3,
-        "interlacing_uncertain": 1,
-    }
-    assert analyzer.date_in_window(report, analyzer.TAGE, date(2026, 11, 3))
-
-
-def test_transcode_rejected_uses_archived_output_candidate():
-    text = REPORT.replace("#1  FAILED", "#1  REJECTED", 1)
-    case = analyzer.parse_cases(text, "transcode")[0]
-    path = analyzer.reconstructed_path(case)
-    assert path.startswith("Kandidaten:")
-    assert "/transcode/archiv/" in path
-    assert case.job_id in path
-    assert ".<outbox>" in path
-    assert "/ausgang/" not in path
-
-
-def test_transcode_failed_output_is_not_inferred():
-    case = analyzer.parse_cases(REPORT, "transcode")[0]
-    assert case.status == "FAILED"
-    assert analyzer.reconstructed_path(case) == "Pfad nicht ableitbar"
-
-
-def test_qc_rejected_lists_flat_report_and_archived_output_candidates():
-    text = REPORT.replace("Detailbericht Transcode", "Detailbericht QC").replace("#1  FAILED", "#1  REJECTED", 1)
-    case = analyzer.parse_cases(text, "qc")[0]
-    path = analyzer.reconstructed_path(case)
-    assert path.startswith("Kandidaten:")
-    assert f"/qc/archiv/{case.job_id}.aqc.json" in path
-    assert f"/qc/archiv/{case.job_id}.<outbox>" in path
-    formatted = analyzer.format_case_path(path)
-    assert formatted.startswith("Kandidaten: `")
-    assert "; `" in formatted
-
-
-def test_blockiert_transcode_uses_archived_output_candidate():
-    text = REPORT.replace("#1  FAILED", "#1  BLOCKIERT", 1)
-    case = analyzer.parse_cases(text, "transcode")[0]
-    assert "/transcode/archiv/" in analyzer.reconstructed_path(case)
-
-
-def test_report_ablagge_is_preferred_and_jobs_are_deduplicated(tmp_path):
-    first_text = REPORT.replace(
-        "    Ablage   Demo/work/Transcode/archiv/20261103T091200123456__4712__transcode1.zip\n",
-        "",
+    second = analyzer.parse_report(
+        write_report(tmp_path, "details_transcode_2026-11-03_10-00-00-000000.txt"), REPORT
     )
-    first = analyzer.read_report(write_report(tmp_path, "details_transcode_2026-11-03_09-00-00-000000.txt", first_text))
-    second_text = REPORT.replace("Demo/work/Transcode/archiv/", "chosen/archive/")
-    second = analyzer.read_report(write_report(tmp_path, "details_transcode_2026-11-03_10-00-00-000000.txt", second_text))
-    cases = analyzer.collect_cases([first, second])
-    rejected = next(case for case in cases if case.status == "REJECTED")
+    folders = {"4711": MASTER_FOLDER, "4712": "other/folder"}
+    cases = analyzer.collect_cases([first, second], folders)
     assert len(cases) == 2
-    assert rejected.path.startswith("chosen/archive/")
+    assert {case.folder for case in cases} == {MASTER_FOLDER, "other/folder"}
+
+    first_text = REPORT.replace("clip_id 4712", "clip_id 9999")
+    first = analyzer.parse_report(Path("first.txt"), first_text)
+    second = analyzer.parse_report(Path("second.txt"), REPORT)
+    deduplicated = analyzer.collect_cases([first, second], folders)
+    rejected = next(case for case in deduplicated if case.status == "REJECTED")
+    assert len(deduplicated) == 2
+    assert rejected.folder == "other/folder"
 
 
 def test_days_filter_prefers_filename_and_falls_back_to_period(tmp_path):
     today = date.today()
     recent = today - timedelta(days=2)
     old = today - timedelta(days=4)
-    recent_report = analyzer.read_report(write_report(tmp_path, f"details_transcode_{recent}_09-00-00-000000.txt"))
-    old_report = analyzer.read_report(write_report(tmp_path, f"details_transcode_{old}_09-00-00-000000.txt"))
+    recent_report = analyzer.parse_report(
+        write_report(tmp_path, f"details_transcode_{recent}_09-00-00-000000.txt"), REPORT
+    )
+    old_report = analyzer.parse_report(
+        write_report(tmp_path, f"details_transcode_{old}_09-00-00-000000.txt"), REPORT
+    )
     assert analyzer.date_in_window(recent_report, 3, today)
     assert not analyzer.date_in_window(old_report, 3, today)
-    fallback_path = tmp_path / "details_transcode_no-date.txt"
-    fallback = analyzer.read_report(write_report(tmp_path, fallback_path.name, REPORT.replace("2026-11-03", today.isoformat())))
+    fallback_text = REPORT.replace("2026-11-03", today.isoformat())
+    fallback = analyzer.parse_report(write_report(tmp_path, "details_transcode_no-date.txt", fallback_text), fallback_text)
     assert fallback.report_date == today
 
 
-def test_days_constant_and_none_include_all_reports(tmp_path, monkeypatch):
+def test_main_keeps_tage_filter_and_writes_plain_text(tmp_path, monkeypatch):
     archive = tmp_path / "archive"
     today = date.today()
     recent = today - timedelta(days=2)
     old = today - timedelta(days=4)
-    write_report(archive, f"details_transcode_{today}_09-00-00-000000.txt")
-    write_report(archive, f"details_transcode_{recent}_09-00-00-000000.txt")
-    write_report(archive, f"details_transcode_{old}_09-00-00-000000.txt")
+    report_today = REPORT.replace("2026-11-03", today.isoformat())
+    write_report(archive, f"details_transcode_{today}_09-00-00-000000.txt", report_today)
+    write_report(archive, f"details_transcode_{recent}_09-00-00-000000.txt", report_today)
+    write_report(archive, f"details_transcode_{old}_09-00-00-000000.txt", report_today)
+    monkeypatch.setattr(analyzer, "STATE_PATH", tmp_path / "missing.json")
 
     monkeypatch.setattr(analyzer, "TAGE", 3)
-    days_output = tmp_path / "summary_days.md"
-    assert analyzer.main(["--archiv", str(archive), "--ausgabe", str(days_output), "--leise"]) == 0
-    days_content = days_output.read_text(encoding="utf-8")
-    assert "Gelesene Berichte: 2" in days_content
-    assert "Fehlerfälle gesamt: 2" in days_content
+    output = tmp_path / "summary.txt"
+    assert analyzer.main(["--archiv", str(archive), "--ausgabe", str(output), "--leise"]) == 0
+    content = output.read_text(encoding="utf-8")
+    assert "Anzahl Berichte: 2" in content
+    assert "Gesamtzahl Fälle: 2" in content
+    assert "nicht in marathon.json gefunden" in content
+    assert "##" not in content and "`" not in content
 
     monkeypatch.setattr(analyzer, "TAGE", None)
-    all_output = tmp_path / "summary_all.md"
+    all_output = tmp_path / "all.txt"
     assert analyzer.main(["--archiv", str(archive), "--ausgabe", str(all_output), "--leise"]) == 0
-    all_content = all_output.read_text(encoding="utf-8")
-    assert "Gelesene Berichte: 3" in all_content
-    assert "Fehlerfälle gesamt: 2" in all_content
-    assert "Demo/work/Transcode/archiv/" in all_content
-    assert "Pfad nicht ableitbar" in all_content
+    assert "Anzahl Berichte: 3" in all_output.read_text(encoding="utf-8")
 
 
-def test_no_argument_cli_reads_fixture_archive_from_script_root(tmp_path):
+def test_no_argument_cli_writes_384_cases_and_state_folder(tmp_path):
     repo = tmp_path / "repo"
     archive = repo / "reports" / "archive"
     archive.mkdir(parents=True)
     script = repo / "auswerte_detailberichte.py"
     shutil.copyfile(REPO_ROOT / "auswerte_detailberichte.py", script)
     shutil.copyfile(FIXTURE, archive / FIXTURE.name)
+    write_state(repo / "state" / "marathon.json", {"415477": state_clip(415477, MASTER_FOLDER)})
 
     result = subprocess.run(
-        [sys.executable, str(script)],
-        cwd=tmp_path,
-        capture_output=True,
-        text=True,
+        [sys.executable, str(script)], cwd=tmp_path, capture_output=True, text=True
     )
     assert result.returncode == 0, result.stderr
-    content = (repo / "auswertung_detailberichte.md").read_text(encoding="utf-8")
+    output = repo / "auswertung_detailberichte.txt"
+    content = output.read_text(encoding="utf-8")
     case_lines = [line for line in content.splitlines() if "Clip-ID:" in line]
-    assert "Fehlerfälle gesamt: 384" in content
+    assert "Gesamtzahl Fälle: 384" in content
     assert len(case_lines) == 384
-    assert all("Pfad:" in line and "Zusatzinfo: Prüfbericht fehlt" in line for line in case_lines)
-    assert not (tmp_path / "auswertung_detailberichte.md").exists()
+    assert f"Ordner: {MASTER_FOLDER}" in content
+    assert "nicht in marathon.json gefunden" in content
+    assert "Tonkanal unsicher: 170" in content
+    assert "audio_channel_uncertain" not in content
+    assert not (repo / "auswertung_detailberichte.md").exists()
 
+
+def test_missing_json_warning_does_not_stop_main(tmp_path, monkeypatch, capsys):
+    archive = tmp_path / "archive"
+    today = date.today()
+    text = REPORT.replace("2026-11-03", today.isoformat())
+    write_report(archive, f"details_transcode_{today}_09-00-00-000000.txt", text)
+    monkeypatch.setattr(analyzer, "STATE_PATH", tmp_path / "missing" / "marathon.json")
+    monkeypatch.setattr(analyzer, "TAGE", None)
+    output = tmp_path / "summary.txt"
+    assert analyzer.main(["--archiv", str(archive), "--ausgabe", str(output)]) == 0
+    assert "marathon.json nicht gefunden" in capsys.readouterr().err
+    assert output.exists()
+    assert analyzer.MISSING_FOLDER in output.read_text(encoding="utf-8")
+
+
+def test_30_mb_state_index_and_report_run_in_seconds(tmp_path, monkeypatch):
+    archive = tmp_path / "archive"
+    shutil.copyfile(FIXTURE, write_report(archive, FIXTURE.name))
+    state_path = tmp_path / "state" / "marathon.json"
+    state_path.parent.mkdir(parents=True)
+    target_bytes = 30_000_000
+    folder_padding = "x" * 300
+    sample = {"clip_id": 123456, "files": {"master": {"folder": "DEFA/" + folder_padding}}}
+    sample_size = len(json.dumps("123456")) + 1 + len(json.dumps(sample, separators=(",", ":"))) + 1
+    clip_count = (target_bytes - 40) // sample_size
+    with state_path.open("w", encoding="utf-8") as handle:
+        handle.write('{"schema_version":8,"clips":{')
+        for clip_id in range(clip_count):
+            if clip_id:
+                handle.write(",")
+            entry = {
+                "clip_id": clip_id,
+                "files": {"master": {"folder": f"DEFA/{clip_id:06d}/" + folder_padding}},
+            }
+            json.dump(str(clip_id), handle)
+            handle.write(":")
+            json.dump(entry, handle, separators=(",", ":"))
+        if clip_count:
+            handle.write(",")
+        json.dump("415477", handle)
+        handle.write(":")
+        json.dump(state_clip(415477, MASTER_FOLDER), handle, separators=(",", ":"))
+        handle.write("}}")
+    size = state_path.stat().st_size
+    assert 29_000_000 <= size <= 31_000_000
+
+    monkeypatch.setattr(analyzer, "STATE_PATH", state_path)
+    monkeypatch.setattr(analyzer, "TAGE", None)
+    output = tmp_path / "summary.txt"
+    started = time.perf_counter()
+    assert analyzer.main(["--archiv", str(archive), "--ausgabe", str(output), "--leise"]) == 0
+    elapsed = time.perf_counter() - started
+    content = output.read_text(encoding="utf-8")
+    assert "Gesamtzahl Fälle: 384" in content
+    assert f"Ordner: {MASTER_FOLDER}" in content
+    assert elapsed < 10, f"30 MB state run took {elapsed:.2f}s"
 
 
 def test_only_matching_transcode_reports_are_opened(tmp_path, monkeypatch):
     archive = tmp_path / "archive"
-    valid = write_report(archive, f"details_transcode_{date.today()}_09-00-00-000000.txt")
-    other_names = [
-        f"details_qc_{date.today()}_09-00-00-000000.txt",
-        f"details_restore_{date.today()}_09-00-00-000000.txt",
-        f"details_transcode_{date.today()}_09-00-00.txt",
+    today = date.today()
+    valid = write_report(archive, f"details_transcode_{today}_09-00-00-000000.txt")
+    for name in (
+        f"details_qc_{today}_09-00-00-000000.txt",
+        f"details_restore_{today}_09-00-00-000000.txt",
+        f"details_transcode_{today}_09-00-00.txt",
         "details_transcode_no-date.txt",
         "error_report.txt",
-    ]
-    for name in other_names:
+    ):
         write_report(archive, name, "must not be read")
 
     opened = []
-    read_report_text = analyzer.read_report_text
+    original = analyzer.read_report_text
 
     def record_read(path):
         opened.append(path)
-        return read_report_text(path)
+        return original(path)
 
     monkeypatch.setattr(analyzer, "read_report_text", record_read)
     monkeypatch.setattr(analyzer, "TAGE", None)
-    output = tmp_path / "summary.md"
+    monkeypatch.setattr(analyzer, "STATE_PATH", tmp_path / "missing.json")
+    output = tmp_path / "summary.txt"
     assert analyzer.main(["--archiv", str(archive), "--ausgabe", str(output), "--leise"]) == 0
     assert opened == [valid]
-    assert "Gelesene Berichte: 1" in output.read_text(encoding="utf-8")
+    assert "Anzahl Berichte: 1" in output.read_text(encoding="utf-8")
 
 
 def test_removed_selector_arguments_are_rejected():
-    script = Path(__file__).resolve().parents[1] / "auswerte_detailberichte.py"
+    script = REPO_ROOT / "auswerte_detailberichte.py"
     for selector in ("--alle", "--tage"):
-        result = subprocess.run(
-            [sys.executable, str(script), selector],
-            capture_output=True,
-            text=True,
-        )
+        result = subprocess.run([sys.executable, str(script), selector], capture_output=True, text=True)
         assert result.returncode == 2
         assert selector in result.stderr

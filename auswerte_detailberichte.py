@@ -1,14 +1,8 @@
 #!/usr/bin/env python3
-"""Summarize failed Transcode detail reports in reports/archive.
-
-The archive filename date takes precedence; the report period's start date
-is the fallback. The window includes today and the preceding TAGE-1
-calendar days. Rejected or blocked job outputs are archived; failed outputs
-are deleted. Reconstructed paths remain candidates because runtime paths
-and the outbox suffix are not present in detail reports.
-"""
+"""Summarize failed Transcode detail reports in reports/archive."""
 
 import argparse
+import json
 import os
 import re
 import sys
@@ -22,6 +16,7 @@ from pathlib import Path
 # Number of calendar days to include; None processes every matching report.
 TAGE = 7
 REPO_ROOT = Path(__file__).resolve().parent
+STATE_PATH = REPO_ROOT / "state" / "marathon.json"
 
 TRANSCODE_REPORT_NAME = re.compile(
     r"details_transcode_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{6}\.txt"
@@ -29,7 +24,7 @@ TRANSCODE_REPORT_NAME = re.compile(
 
 BLOCK_START = re.compile(r"^#\s*\d+\s+(FAILED|REJECTED|BLOCKIERT)\b(.*)$", re.I)
 FIELD = re.compile(
-    r"^\s*(clip_id|Job|Zeit|Versuch|Ergebnis|Fehler|Ist|Info|Ablage)\s+(.*?)\s*$",
+    r"^\s*(clip_id|Job|Zeit|Versuch|Ergebnis|Fehler|Ist|Info)\s+(.*?)\s*$",
     re.I,
 )
 DATE_IN_NAME = re.compile(r"_(\d{4}-\d{2}-\d{2})_")
@@ -57,7 +52,7 @@ class ReportCase:
     job_id: str = ""
     result: str = ""
     extra_info: str = ""
-    path: str = ""
+    folder: str = ""
     stage: str = ""
     category: str = ""
 
@@ -129,7 +124,6 @@ def parse_cases(text: str, stage: str) -> list[ReportCase]:
             for key in ("fehler", "ist", "info")
             if fields.get(key)
         )
-        current.path = fields.get("ablage", "").strip()
         current.stage = stage
         current.category = categorize(current)
         cases.append(current)
@@ -201,42 +195,66 @@ def categorize(case: ReportCase) -> str:
     return "worker_failed"
 
 
-def archive_path_pattern(case: ReportCase) -> str:
-    collection_layout = (
-        "<final_folder>/<work_dir>[/<sanitisierte Kollektion> bei DEFA]"
-    )
-    return f"<root_path>/{collection_layout}/{case.stage}/archiv/{case.job_id}.<outbox>"
+CATEGORY_LABELS = {
+    "audio_channel_not_duplicate": "Hörbarer, nicht doppelter Tonkanal",
+    "audio_channel_uncertain": "Tonkanal unsicher",
+    "audio_duplicate_uncertain": "Audiodublette unsicher",
+    "audio_source_without_tone": "Quellmaterial ohne Ton",
+    "delivery_or_master_blocked": "Ablage oder Master blockiert",
+    "interlacing_uncertain": "Interlacing unsicher",
+    "missing_ffe_test_card": "FFE-Testtafel fehlt",
+    "no_audible_audio_channel": "Kein hörbarer Tonkanal",
+    "qc_rejected": "Qualitätskontrolle abgelehnt",
+    "restore_incomplete": "Wiederherstellung unvollständig",
+    "source_streams_not_transferable": "Quellstreams nicht sicher übertragbar",
+    "transcode_output_contract": "Transcode-Ausgabe fehlerhaft",
+    "worker_failed": "Worker-Fehler",
+}
+MISSING_FOLDER = "nicht in marathon.json gefunden"
 
 
-def reconstructed_path(case: ReportCase) -> str:
-    if case.path:
-        return case.path
-    if not case.job_id or case.status not in {"REJECTED", "BLOCKIERT"}:
-        return "Pfad nicht ableitbar"
-    if case.stage == "transcode":
-        return f"Kandidaten: {archive_path_pattern(case)}"
-    if case.stage == "qc":
-        flat_report = f"<root_path>/<work_dir>/qc/archiv/{case.job_id}.aqc.json"
-        archived_output = archive_path_pattern(case)
-        return f"Kandidaten: {flat_report}; {archived_output}"
-    return "Pfad nicht ableitbar"
+def normalize_clip_id(value) -> str | None:
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        return None
+    clip_id = str(value)
+    return clip_id if clip_id else None
 
 
-def path_quality(path: str) -> int:
-    if not path or path == "Pfad nicht ableitbar":
-        return 0
-    if path.startswith("Kandidaten:"):
-        return 1
-    return 2
+def build_clip_folder_index(state) -> dict[str, str]:
+    if not isinstance(state, dict):
+        return {}
+    clips = state.get("clips")
+    if isinstance(clips, dict):
+        entries = clips.items()
+    elif isinstance(clips, list):
+        entries = ((None, clip) for clip in clips)
+    else:
+        return {}
+
+    folders = {}
+    for key, clip in entries:
+        if not isinstance(clip, dict):
+            continue
+        clip_id = normalize_clip_id(clip.get("clip_id"))
+        if clip_id is None:
+            clip_id = normalize_clip_id(key)
+        files = clip.get("files")
+        master = files.get("master") if isinstance(files, dict) else None
+        folder = master.get("folder") if isinstance(master, dict) else None
+        if clip_id is not None and isinstance(folder, str) and folder:
+            folders[clip_id] = folder
+    return folders
 
 
-def format_case_path(path: str) -> str:
-    if path.startswith("Kandidaten:"):
-        candidates = path.removeprefix("Kandidaten:").strip().split("; ")
-        return "Kandidaten: " + "; ".join(f"`{candidate}`" for candidate in candidates)
-    if path == "Pfad nicht ableitbar":
-        return path
-    return f"`{path}`"
+def load_clip_folder_index(path: Path) -> tuple[dict[str, str], str | None]:
+    try:
+        with path.open(encoding="utf-8") as handle:
+            state = json.load(handle)
+    except FileNotFoundError:
+        return {}, f"Warnung: {path.name} nicht gefunden; Ordner werden als „{MISSING_FOLDER}“ ausgegeben."
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        return {}, f"Warnung: {path.name} nicht lesbar; Ordner werden als „{MISSING_FOLDER}“ ausgegeben. ({error})"
+    return build_clip_folder_index(state), None
 
 
 def read_report_text(path: Path) -> tuple[str | None, str | None]:
@@ -277,14 +295,16 @@ def date_in_window(report: Report, days: int, today: date) -> bool:
     return today - timedelta(days=days - 1) <= report.report_date <= today
 
 
-def collect_cases(reports: list[Report]) -> list[ReportCase]:
+def collect_cases(reports: list[Report], clip_folders: dict[str, str]) -> list[ReportCase]:
     unique = {}
     for report in reports:
         for index, case in enumerate(report.cases):
-            case.path = reconstructed_path(case)
+            case.folder = clip_folders.get(case.clip_id, MISSING_FOLDER)
             key = case.job_id or f"{report.path.name}:{index}"
             previous = unique.get(key)
-            if previous is None or path_quality(case.path) > path_quality(previous.path):
+            if previous is None or (
+                previous.folder == MISSING_FOLDER and case.folder != MISSING_FOLDER
+            ):
                 unique[key] = case
     return list(unique.values())
 
@@ -300,36 +320,44 @@ def period_label(reports: list[Report]) -> str:
 
 def write_summary(path: Path, reports: list[Report], cases: list[ReportCase]) -> None:
     counts = {}
+    grouped = {}
     for case in cases:
         counts[case.category] = counts.get(case.category, 0) + 1
+        grouped.setdefault(case.category, []).append(case)
+    categories = sorted(
+        counts,
+        key=lambda category: (-counts[category], CATEGORY_LABELS.get(category, category).casefold()),
+    )
     lines = [
-        "# Auswertung der Detailberichte",
+        "Auswertung der Detailberichte",
+        "=============================",
+        f"Zeitraum: {period_label(reports)}",
+        f"Anzahl Berichte: {len(reports)}",
+        f"Gesamtzahl Fälle: {len(cases)}",
         "",
-        f"- Auswertezeitraum: {period_label(reports)}",
-        f"- Gelesene Berichte: {len(reports)}",
-        f"- Fehlerfälle gesamt: {len(cases)}",
-        "",
-        "## Fehlerfälle je Kategorie",
-        "",
+        "Kategorien nach Häufigkeit",
+        "--------------------------",
     ]
-    if counts:
-        lines.extend(f"- `{category}`: {count}" for category, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])))
+    if categories:
+        lines.extend(
+            f"  {CATEGORY_LABELS.get(category, category)}: {counts[category]}"
+            for category in categories
+        )
     else:
-        lines.append("- Keine Fehlerfälle gefunden.")
-    lines.extend(("", "## Fehlerfälle", ""))
-    if cases:
-        for case in sorted(cases, key=lambda item: (item.category, item.job_id, item.title)):
-            identifier = f"`{case.job_id}`" if case.job_id else "`Job-ID fehlt`"
-            clip_id = f"`{case.clip_id}`" if case.clip_id else "`Clip-ID fehlt`"
-            line = (
-                f"- {identifier} — Clip-ID: {clip_id} — `{case.category}`"
-                f" — Pfad: {format_case_path(case.path)}"
+        lines.append("  Keine Fälle gefunden.")
+    lines.extend(("", "Fälle je Kategorie", "------------------"))
+    for category in categories:
+        label = CATEGORY_LABELS.get(category, category)
+        lines.extend(("", f"{label} ({counts[category]})"))
+        for case in sorted(grouped[category], key=lambda item: (item.job_id, item.title)):
+            job_id = case.job_id or "Job-ID fehlt"
+            clip_id = case.clip_id or "Clip-ID fehlt"
+            lines.append(
+                f"  Job: {job_id} | Clip-ID: {clip_id} | Status: {case.status} | {case.title}"
             )
+            lines.append(f"    Ordner: {case.folder}")
             if case.extra_info:
-                line += f" — Zusatzinfo: {case.extra_info}"
-            lines.append(line)
-    else:
-        lines.append("- Keine Fehlerfälle gefunden.")
+                lines.append(f"    Zusatzinfo: {case.extra_info}")
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -345,8 +373,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--ausgabe",
         type=Path,
-        default=REPO_ROOT / "auswertung_detailberichte.md",
-        help="Zieldatei (Standard: auswertung_detailberichte.md im Repo-Root)",
+        default=REPO_ROOT / "auswertung_detailberichte.txt",
+        help="Zieldatei (Standard: auswertung_detailberichte.txt im Repo-Root)",
     )
     parser.add_argument("--leise", action="store_true", help="Fortschritts- und Warnmeldungen unterdrücken")
     return parser
@@ -431,9 +459,13 @@ def main(argv: list[str] | None = None) -> int:
     show_progress(args.leise, f"Suchen: {len(paths)} Detailberichte gefunden")
     finish_progress(args.leise)
 
+    clip_folders, state_warning = load_clip_folder_index(STATE_PATH)
+    if state_warning:
+        print_warning(args.leise, state_warning)
+
     reports, failed_reports = load_reports(paths, args.leise, TAGE)
     show_progress(args.leise, "Auswerten: Fehlerfälle zusammenführen")
-    cases = collect_cases(reports)
+    cases = collect_cases(reports, clip_folders)
     finish_progress(args.leise)
 
     show_progress(args.leise, f"Schreiben: {args.ausgabe}")
