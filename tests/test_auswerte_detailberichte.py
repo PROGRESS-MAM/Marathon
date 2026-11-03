@@ -116,101 +116,82 @@ def test_days_filter_prefers_filename_and_falls_back_to_period(tmp_path):
     assert fallback.report_date == today
 
 
-def test_cli_all_and_days_dedupe_and_write_summary(tmp_path):
+def test_days_constant_and_none_include_all_reports(tmp_path, monkeypatch):
     archive = tmp_path / "archive"
     today = date.today()
+    recent = today - timedelta(days=2)
+    old = today - timedelta(days=4)
     write_report(archive, f"details_transcode_{today}_09-00-00-000000.txt")
-    write_report(archive, f"details_transcode_{today}_10-00-00-000000.txt")
-    script = Path(__file__).resolve().parents[1] / "auswerte_detailberichte.py"
-    for selector_args, label in ((("--alle",), "alle"), (("--tage", "3"), "tage")):
-        output = tmp_path / f"summary_{label}.md"
-        result = subprocess.run(
-            [sys.executable, str(script), *selector_args, "--archiv", str(archive), "--ausgabe", str(output)],
-            capture_output=True,
-            text=True,
-        )
-        assert result.returncode == 0, result.stderr
-        content = output.read_text(encoding="utf-8")
-        assert "Fehlerfälle gesamt: 2" in content
-        assert "transcode_output_contract" in content
-        assert "worker_failed" in content
-        assert "Demo/work/Transcode/archiv/" in content
-        assert "Pfad nicht ableitbar" in content
+    write_report(archive, f"details_transcode_{recent}_09-00-00-000000.txt")
+    write_report(archive, f"details_transcode_{old}_09-00-00-000000.txt")
+
+    monkeypatch.setattr(analyzer, "TAGE", 3)
+    days_output = tmp_path / "summary_days.md"
+    assert analyzer.main(["--archiv", str(archive), "--ausgabe", str(days_output), "--leise"]) == 0
+    days_content = days_output.read_text(encoding="utf-8")
+    assert "Gelesene Berichte: 2" in days_content
+    assert "Fehlerfälle gesamt: 2" in days_content
+
+    monkeypatch.setattr(analyzer, "TAGE", None)
+    all_output = tmp_path / "summary_all.md"
+    assert analyzer.main(["--archiv", str(archive), "--ausgabe", str(all_output), "--leise"]) == 0
+    all_content = all_output.read_text(encoding="utf-8")
+    assert "Gelesene Berichte: 3" in all_content
+    assert "Fehlerfälle gesamt: 2" in all_content
+    assert "Demo/work/Transcode/archiv/" in all_content
+    assert "Pfad nicht ableitbar" in all_content
 
 
-def test_cli_labels_qc_archive_options_as_candidates(tmp_path):
-    archive = tmp_path / "archive"
-    qc_report = REPORT.replace("Detailbericht Transcode", "Detailbericht QC").replace("#1  FAILED", "#1  REJECTED", 1)
-    today = date.today()
-    write_report(archive, f"details_qc_{today}_09-00-00-000000.txt", qc_report)
+def test_cli_runs_without_required_selector(tmp_path):
+    archive = tmp_path / "reports" / "archive"
+    write_report(archive, f"details_transcode_{date.today()}_09-00-00-000000.txt")
     script = Path(__file__).resolve().parents[1] / "auswerte_detailberichte.py"
-    output = tmp_path / "summary.md"
     result = subprocess.run(
-        [sys.executable, str(script), "--alle", "--archiv", str(archive), "--ausgabe", str(output)],
+        [sys.executable, str(script)],
+        cwd=tmp_path,
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, result.stderr
-    content = output.read_text(encoding="utf-8")
-    assert "Kandidaten:" in content
-    assert ".aqc.json" in content
-    assert ".<outbox>" in content
+    content = (tmp_path / "auswertung_detailberichte.md").read_text(encoding="utf-8")
+    assert "Gelesene Berichte: 1" in content
 
 
-def test_cli_requires_exactly_one_selector(tmp_path):
+def test_only_matching_transcode_reports_are_opened(tmp_path, monkeypatch):
+    archive = tmp_path / "archive"
+    valid = write_report(archive, f"details_transcode_{date.today()}_09-00-00-000000.txt")
+    other_names = [
+        f"details_qc_{date.today()}_09-00-00-000000.txt",
+        f"details_restore_{date.today()}_09-00-00-000000.txt",
+        f"details_transcode_{date.today()}_09-00-00.txt",
+        "details_transcode_no-date.txt",
+        "error_report.txt",
+    ]
+    for name in other_names:
+        write_report(archive, name, "must not be read")
+
+    opened = []
+    read_report_text = analyzer.read_report_text
+
+    def record_read(path):
+        opened.append(path)
+        return read_report_text(path)
+
+    monkeypatch.setattr(analyzer, "read_report_text", record_read)
+    monkeypatch.setattr(analyzer, "TAGE", None)
+    output = tmp_path / "summary.md"
+    assert analyzer.main(["--archiv", str(archive), "--ausgabe", str(output), "--leise"]) == 0
+    assert opened == [valid]
+    assert "Gelesene Berichte: 1" in output.read_text(encoding="utf-8")
+
+
+def test_removed_selector_arguments_are_rejected():
     script = Path(__file__).resolve().parents[1] / "auswerte_detailberichte.py"
-    result = subprocess.run([sys.executable, str(script)], capture_output=True, text=True)
-    assert result.returncode != 0
-    assert "one of the arguments --alle --tage is required" in result.stderr
-
-
-def test_cli_reports_progress_on_stderr(tmp_path):
-    archive = tmp_path / "archive"
-    write_report(archive, "details_transcode_2026-11-03_09-00-00-000000.txt")
-    output = tmp_path / "summary.md"
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(Path(analyzer.__file__)),
-            "--alle",
-            "--archiv",
-            str(archive),
-            "--ausgabe",
-            str(output),
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert result.stdout == ""
-    assert "Suchen:" in result.stderr
-    assert "Lesen [1/1] details_transcode_2026-11-03_09-00-00-000000.txt" in result.stderr
-    assert "Auswerten" in result.stderr
-    assert "Schreiben:" in result.stderr
-    assert "Fertig in " in result.stderr
-    assert "Berichte: 1" in result.stderr
-    assert "Fehlerfälle: 2" in result.stderr
-
-
-def test_cli_quiet_suppresses_progress_and_summary(tmp_path):
-    archive = tmp_path / "archive"
-    write_report(archive, "details_transcode_2026-11-03_09-00-00-000000.txt")
-    output = tmp_path / "summary.md"
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(Path(analyzer.__file__)),
-            "--alle",
-            "--archiv",
-            str(archive),
-            "--ausgabe",
-            str(output),
-            "--leise",
-        ],
-        capture_output=True,
-        text=True,
-        check=True,
-    )
-    assert result.stdout == ""
-    assert result.stderr == ""
-    assert output.exists()
+    for selector in ("--alle", "--tage"):
+        result = subprocess.run(
+            [sys.executable, str(script), selector],
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 2
+        assert selector in result.stderr

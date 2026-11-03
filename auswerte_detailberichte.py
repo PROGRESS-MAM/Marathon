@@ -1,12 +1,11 @@
 #!/usr/bin/env python3
-"""Summarize failed detail-report cases in reports/archive.
+"""Summarize failed Transcode detail reports in reports/archive.
 
-For --tage, the archive filename date takes precedence; the report period's
-start date is the fallback. The window includes today and the preceding X-1
+The archive filename date takes precedence; the report period's start date
+is the fallback. The window includes today and the preceding TAGE-1
 calendar days. Rejected or blocked job outputs are archived; failed outputs
-are deleted. QC output may be a flat AQC report or an archived stage output.
-Reconstructed paths remain candidates because runtime paths and the outbox
-suffix are not present in detail reports.
+are deleted. Reconstructed paths remain candidates because runtime paths
+and the outbox suffix are not present in detail reports.
 """
 
 import argparse
@@ -19,6 +18,13 @@ from collections import deque
 from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
+
+# Number of calendar days to include; None processes every matching report.
+TAGE = 7
+
+TRANSCODE_REPORT_NAME = re.compile(
+    r"details_transcode_\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}-\d{6}\.txt"
+)
 
 BLOCK_START = re.compile(r"^#\s*\d+\s+(FAILED|REJECTED|BLOCKIERT)\b(.*)$", re.I)
 FIELD = re.compile(
@@ -282,12 +288,10 @@ def write_summary(path: Path, reports: list[Report], cases: list[ReportCase]) ->
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Detailberichte aus reports/archive zusammenfassen.")
-    selection = parser.add_mutually_exclusive_group(required=True)
-    selection.add_argument("--alle", action="store_true", help="alle passenden Detailberichte auswerten")
-    selection.add_argument("--tage", type=int, metavar="X", help="Berichte der letzten X Kalendertage auswerten (inklusive heute)")
+    parser = argparse.ArgumentParser(description="Transcode-Detailberichte aus reports/archive zusammenfassen.")
     parser.add_argument("--archiv", type=Path, default=Path("reports/archive"), help="Archivverzeichnis (Standard: reports/archive)")
     parser.add_argument("--ausgabe", type=Path, default=Path("auswertung_detailberichte.md"), help="Zieldatei (Standard: auswertung_detailberichte.md)")
+    parser.add_argument("--leise", action="store_true", help="Fortschritts- und Warnmeldungen unterdrücken")
     return parser
 
 
@@ -297,8 +301,7 @@ def discover_reports(archive: Path) -> tuple[list[Path], str | None]:
             paths = [
                 Path(entry.path)
                 for entry in entries
-                if entry.name.startswith("details_")
-                and entry.name.endswith(".txt")
+                if TRANSCODE_REPORT_NAME.fullmatch(entry.name)
                 and entry.is_file()
             ]
     except OSError as error:
@@ -361,10 +364,7 @@ def load_reports(paths: list[Path], quiet: bool, days: int | None) -> tuple[list
 
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    parser.add_argument("--leise", action="store_true", help="Fortschritts- und Warnmeldungen unterdrücken")
     args = parser.parse_args(argv)
-    if args.tage is not None and args.tage < 1:
-        parser.error("--tage muss mindestens 1 sein")
 
     started = time.perf_counter()
     show_progress(args.leise, f"Suchen: {args.archiv}")
@@ -374,7 +374,7 @@ def main(argv: list[str] | None = None) -> int:
     show_progress(args.leise, f"Suchen: {len(paths)} Detailberichte gefunden")
     finish_progress(args.leise)
 
-    reports, failed_reports = load_reports(paths, args.leise, args.tage)
+    reports, failed_reports = load_reports(paths, args.leise, TAGE)
     show_progress(args.leise, "Auswerten: Fehlerfälle zusammenführen")
     cases = collect_cases(reports)
     finish_progress(args.leise)
