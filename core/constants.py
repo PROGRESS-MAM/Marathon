@@ -99,7 +99,7 @@ editshare_filter_fields = frozenset({"006 Source PROGRESS", "007 Collection PROG
 token_key = "vt_api_token"  # KEY=VALUE line in token_file
 veritone_page_size, veritone_timeout = 200, 120  # Search and byIds take at most 200 per call.
 veritone_placeholder = ("Production.Codec", "placeholder")  # Field and casefolded value of placeholder assets.
-veritone_passes = 3  # Paging is not always stable; missing assets are searched again in further passes.
+veritone_passes = 10  # Paging is not always stable; missing assets are searched again in further passes.
 veritone_settle_seconds = 30  # Wait between triggering a search and reading its pages; the API has no "done" signal.
 tracked_fields = {"collection": "Kollektion", "identifier": field_names["identifier"], "title": field_names["title"],
                   "clip_name_with_extension": field_names["clip_name"], "masters": "Dateien", "veritone_id": "Veritone-ID"}
