@@ -8,3 +8,13 @@
 /pipelines
 config.ini
 __pycache__
+
+# Python
+*.py[cod]
+.pytest_cache/
+
+# Secrets
+.env
+
+# monarch: local job state, never part of the snapshot
+.monarch/

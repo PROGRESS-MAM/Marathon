@@ -13,6 +13,7 @@ from .layout import res
 
 # --------- STATIC ---------
 flow_hash_pattern = re.compile(r"2:[0-9a-f]+", re.IGNORECASE)
+joined_fields, value_separator = ("title", "clip_name"), "; "  # EditShare text may contain "; ", which the search also puts between values.
 
 
 # --------- FILES ---------
@@ -111,6 +112,8 @@ def masters_of(texts: list[str]) -> tuple[list[dict], str | None]:
 # --------- HITS ---------
 def _merge_hit(hit: dict) -> dict:
     rows = hit.pop("rows")
+    for row in rows:
+        row.update({field: [value_separator.join(row[field])] for field in joined_fields if len(row[field]) > 1})
     masters, restore_problem = masters_of([text for row in rows for kind in file_kinds for text in row[kind]])
     tapes = {}
     for tape in (tape for entry in masters for tape in entry["tapes"]):

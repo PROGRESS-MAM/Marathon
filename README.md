@@ -67,6 +67,11 @@ Ohne Fehler:
 
 Bei einem Fehler bleibt die JSON Version 7; der Fehlerbericht `reports/errors/transfer_<stempel>_errors.txt` nennt alle Gründe, bei Ordnern jeden betroffenen Ordner mit seinen Dateien. Scheitert das Entfernen eines Ordners trotz Prüfung, nennt er die bereits entfernten leeren Ordner.
 
+## Update auf 1.18.4
+
+- Nur `core/search.py` und `core/__init__.py` ersetzen; Konfiguration und JSON bleiben unverändert.
+- `014 Title Original` und `clip_name_with_extension` mit „; “ im Text (bisher „N Werte“ unter „Unvollständige oder widersprüchliche Metadaten“) werden wieder zu einem Text mit „; “ zusammengesetzt und beim nächsten `update-index` aufgenommen, z. B. `Unruhe; Wopyt`.
+
 ## Update auf 1.18.3
 
 - Nur `core/jobs.py`, `core/share.py` und `core/__init__.py` ersetzen; Konfiguration und JSON bleiben unverändert.
@@ -141,6 +146,7 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 - Clips in der JSON: Fehlende Felder und eine leere Veritone-ID werden aus der Suche ergänzt (History `Fehlende Felder ergänzt`). Vorhandene Werte bleiben; Abweichungen stehen nur in der Index-Fehlerliste.
 - Clips in der JSON, die die Suche (EditShare ∩ Veritone) nicht mehr findet: Der Clip wird inaktiv (`Nicht mehr im Index`), bleibt in seiner Stufe und zählt weiter in Gesamt. Eintrag in der Index-Fehlerliste; der Bericht zeigt die Anzahl in der Zeile `Nicht mehr im Index`. Bereite Clips bleiben aktiv und werden nur gemeldet; ein bereits inaktiver Clip behält seinen bisherigen Grund.
 - Ein später wieder gefundener Clip bleibt inaktiv, bis er mit `retry-<stufe>` freigegeben wird.
+- `014 Title Original` und `clip_name_with_extension` mit mehreren Werten (Trenner „; “) gelten als ein Wert: Die Teile werden in ihrer Reihenfolge mit „; “ zusammengesetzt. Fehlt der Wert oder hat `001 Identifier` mehrere Werte, wird der Clip nicht aufgenommen („Unvollständige oder widersprüchliche Metadaten“).
 - Dateien je Clip: aus `video.file`, `audio.file` und `data.file`. Je Datei Name = `display_name` + „.“ + `display_fileext`, Hash = `file.hash` (Form `2:<hex>`), Größe = `file.filesize`, Bänder = alle `backup_locations[].tapes`. Dateien mit gleichem Hash werden zusammengefasst. Am Clip stehen sie in `masters` (`file`, `flow_hash`, `size`, `tapes`, sortiert nach Name), daraus `master_files`, `lto_tapes` und `master_size` (Summe aller Dateien).
 - Fehlt bei einer Datei Name, Endung, Hash, Größe oder Band, ist ein Name unzulässig (`<>:"/\|?*` oder Steuerzeichen), hat ein Hash mehrere Namen oder Größen oder ein Name mehrere Hashes, wird ein neuer Clip, der einen Restore braucht, nicht aufgenommen (Index-Fehlerliste: „Dateien in EditShare unvollständig oder widersprüchlich“). Bei Clips in der JSON stehen geänderte Dateien nur unter „Metadaten in der Suche geändert“.
 - Nur `update-index` sucht. `run` führt `update-index` nur aus, wenn noch keine JSON existiert; Job-Schleife und Berichte suchen nie.
