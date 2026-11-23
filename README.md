@@ -1,6 +1,6 @@
 # Marathon
 
-Marathon baut aus EditShare-Suche und Veritone einen Clip-Index (JSON), legt Restore-Sammeljobs je Band sowie Transcode- und QC-Jobs nach Prioliste für die Worker aus und erstellt Berichte. Zusätzlich markiert Marathon Clips, die die FFE-Filmtafel benötigen, stellt den Workern die Referenzdateien bereit und übernimmt auf Befehl vorhandene Master (`ingest-master`) und vorhandene Proxys (`ingest-proxy`). Im Test-Modus (`test`) laufen Test-Jobs durch die Worker, ohne den Produktionsstand zu ändern.
+Marathon baut aus EditShare-Suche und Veritone einen Clip-Index (JSON), legt Restore-Sammeljobs je Band sowie Transcode- und QC-Jobs nach Prioliste für die Worker aus und erstellt Berichte. Zusätzlich markiert Marathon Clips, die die FFE-Filmtafel benötigen, stellt den Workern die Referenzdateien bereit und übernimmt auf Befehl vorhandene Master (`ingest-master`) und vorhandene Proxys (`ingest-proxy`) und sendet bereite Proxys auf Befehl an den FTP-Pfad (`send-to-ftp`). Im Test-Modus (`test`) laufen Test-Jobs durch die Worker, ohne den Produktionsstand zu ändern.
 
 ## Installation
 
@@ -67,6 +67,18 @@ Ohne Fehler:
 
 Bei einem Fehler bleibt die JSON Version 7; der Fehlerbericht `reports/errors/transfer_<stempel>_errors.txt` nennt alle Gründe, bei Ordnern jeden betroffenen Ordner mit seinen Dateien. Scheitert das Entfernen eines Ordners trotz Prüfung, nennt er die bereits entfernten leeren Ordner.
 
+## Update auf 1.19.0
+
+- Geänderte Programmdateien und die neuen `core/ftp.py` und `core/ftpcheck.py` in den bestehenden Marathon-Ordner kopieren; JSON-Version 8 bleibt, kein Transfer nötig.
+- Vor dem Start in der vorhandenen `res/config.ini` ergänzen:
+
+~~~ini
+[ftp]
+ftp_dir = \\10.0.77.102\FiMu 10 Mbit Proxy
+~~~
+
+Fehlt der Eintrag, pausiert Marathon, bis er ergänzt ist.
+
 ## Update auf 1.18.4
 
 - Nur `core/search.py` und `core/__init__.py` ersetzen; Konfiguration und JSON bleiben unverändert.
@@ -123,6 +135,7 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 | `update-ffe` | Nur FFE-Liste mit der bestehenden JSON abgleichen, ohne Suche |
 | `ingest-master` | Masterdateien aus `master_dir` über die DEFA-ID abgleichen und eintragen (weiter an Transcode); nur auf Befehl |
 | `ingest-proxy` | Proxys aus `proxy_dir` über die DEFA-ID abgleichen, umbenannt in den QC-Eingang verschieben (weiter an QC); nur auf Befehl |
+| `send-to-ftp` | Bereite Clips nach letzter Prüfung in EditShare und Veritone nach `ftp_dir` kopieren, Quelle im Zielordner umbenennen, EditShare-Feld setzen; nur auf Befehl (siehe An FTP senden) |
 | `retry-restore` | Alle inaktiven Clips der Stufe Restore wieder freigeben (siehe Wieder freigeben) |
 | `retry-transcode` | Alle inaktiven Clips der Stufe Transcode wieder freigeben (siehe Wieder freigeben) |
 | `retry-qc` | Alle inaktiven Clips der Stufe QC wieder freigeben (siehe Wieder freigeben) |
@@ -135,7 +148,8 @@ Marathon läuft nur einmal pro Rechner (Sperre in `state/marathon.lock`).
 
 - Alle Proxys heißen nach `[paths] proxy_name`, Standard `{veritone_id}_{clip_id}_10Mbit.mp4`, z. B. `1234567_98765_10Mbit.mp4`.
 - `veritone_id` = Veritone-Asset-ID (in Veritone „Record ID“, Adresse `…/search/asset/<id>`), `clip_id` = EditShare-`clip_id`. Identifier und Titel stehen über die `clip_id` in der JSON.
-- Marathon erkennt Proxys im Zielordner und im QC-Eingang nur unter diesem Namen (Groß-/Kleinschreibung egal), auch bei `update-index` und `delete-folder`.
+- Marathon erkennt Proxys im Zielordner und im QC-Eingang nur unter diesem Namen (Groß-/Kleinschreibung egal), auch bei `update-index` und `delete-folder` (Ausnahme: an den FTP gesendete Proxys, siehe An FTP senden).
+- Nach `send-to-ftp` heißt der Proxy im Zielordner `<001 Identifier>__<014 Title Original>.mp4`; Marathon führt ihn unter diesem Namen (`files.proxy` und `ftp` in der JSON), auch bei `delete-folder`. Die Kopie auf dem FTP behält den Namen nach `proxy_name`.
 - Transcode-Worker liefern genau den Namen aus `proxy_name` im Job; ein anderer Name lässt den Job fehlschlagen.
 - Clip ohne Veritone-ID: Der Restore läuft, vor dem Transcode wird der Clip inaktiv (`Veritone-ID fehlt`), bis `update-index` die ID ergänzt.
 
@@ -279,6 +293,7 @@ Maßgeblich ist der Wert beim Erstellen des Jobs.
 **EditShare-Feld:**
 
 - Nach jeder Auslieferung (auch nach `ingest-proxy`) setzt Marathon im selben Job-Zyklus das Custom-Feld `39d 10 Mbit Proxy Path` des Clips auf den Pfad des ausgelieferten Proxys, z. B. `\\10.0.77.11\Ablage KI Proxy_1\Proxy 10 Mbit\DEFA\1234567_98765_10Mbit.mp4`.
+- Nach `send-to-ftp` setzt Marathon das Feld auf den neuen Namen im selben Ordner, z. B. `\\10.0.77.11\Ablage KI Proxy_1\Proxy 10 Mbit\DEFA\DEFA14097__Rosa Luxemburg - Stationen ihres Lebens.mp4`.
 - Zugang über `cred_file`; der FLOW-Benutzer braucht Schreibrecht auf das Feld.
 - Scheitert das Setzen, bleibt eine offene Aufgabe in der JSON (`editshare`), und Marathon versucht es in jedem Job-Zyklus erneut. Ab 3 gescheiterten Zyklen steht der Clip im Bericht unter „EditShare-Feld nicht gesetzt“; er zählt weiter als bereit.
 - Proxys, die vor Version 1.10.0 ausgeliefert wurden, bekommen das Feld nicht nachträglich.
@@ -463,6 +478,34 @@ Nicht eingetragene Dateien bleiben unverändert liegen.
 
 Fehler und Hinweise stehen in `reports/errors/ingest-master_<stempel>_errors.txt` bzw. `reports/errors/ingest-proxy_<stempel>_errors.txt`, die Zahlen im Protokoll.
 
+## An FTP senden (`send-to-ftp`)
+
+~~~bash
+Marathon> send-to-ftp
+python marathon.py send-to-ftp    # oder direkt beim Start
+~~~
+
+- Läuft nur auf Befehl. Gesendet werden alle bereiten, aktiven Clips aller Kollektionen, deren Proxy noch nicht gesendet wurde. Quelle ist der Zielordner der Kollektion (`<root_path>/<defa_dir>` bzw. `<root_path>/<Kollektion>`).
+- **Letzte Prüfung:** Vor dem Kopieren sucht Marathon neu in EditShare und Veritone, nur in den Kollektionen der zu sendenden Clips (Dauer wie `update-index`; der Index bleibt unverändert). Gesendet wird ein Clip nur, wenn er in EditShare genau einmal gefunden wird, Kollektion, `001 Identifier`, `014 Title Original` und Veritone-ID der JSON entsprechen, kein anderer EditShare-Clip der Kollektion denselben Identifier hat und der Barcode bei Veritone genau ein Asset hat. Scheitert die Suche, bricht der Befehl ab, ohne etwas zu kopieren.
+- **Kopieren:** nach `[ftp] ftp_dir` unter dem Namen nach `proxy_name`, z. B. `1234567_98765_10Mbit.mp4`; zunächst als `<Name>.part`, nach der Größenprüfung umbenannt. Eine vorhandene Datei auf dem FTP wird nie überschrieben.
+- **Umbenennen:** danach die Quelle im Zielordner in `<001 Identifier>__<014 Title Original>.mp4`, z. B. `DEFA14097__Rosa Luxemburg - Stationen ihres Lebens.mp4`. Die Zeichen `<>:"/\|?*` und Steuerzeichen werden durch `_` ersetzt. Der Ordner bleibt gleich; vorhandene Dateien werden nie überschrieben.
+- **EditShare-Feld:** `39d 10 Mbit Proxy Path` erhält den neuen Pfad; scheitert das, versucht Marathon es in jedem Job-Zyklus erneut (siehe EditShare-Feld).
+- In der JSON zeigt `files.proxy` auf den neuen Namen; der Clip erhält den Eintrag `ftp` (`target`, `size`, `old_name`, `new_name`, `copied_at`, `renamed_at`) und die History-Ereignisse `An FTP kopiert` und `Quelle umbenannt`. Gesendete Clips werden nicht erneut gesendet.
+- Ein unterbrochener Lauf wird beim nächsten `send-to-ftp` fortgesetzt: Eine vollständige Kopie auf dem FTP wird nicht erneut kopiert, eine bereits umbenannte Quelle wird übernommen.
+
+| Fehler | Folge |
+| --- | --- |
+| Letzte Prüfung nicht bestanden | nichts kopiert |
+| Proxy-Name weicht von `proxy_name` ab | nichts kopiert |
+| Proxy im Zielordner fehlt oder ist leer | nichts kopiert |
+| Kein Dateiname aus Identifier/Titel möglich | nichts kopiert |
+| Namenskonflikt auf dem FTP | nichts kopiert, nichts überschrieben |
+| Namenskonflikt im Zielordner | Quelle nicht umbenannt; eine vorhandene Kopie bleibt, der nächste Lauf benennt um |
+| Kopie unvollständig / Kopieren nicht möglich | `.part` entfernt, Quelle unverändert |
+| Umbenennen nicht möglich | Kopie vorhanden, Quelle unverändert; der nächste Lauf benennt um |
+
+Fehler stehen in `reports/errors/send-to-ftp_<stempel>_errors.txt`, die Zahlen im Protokoll.
+
 ## Test-Modus
 
 Test-Jobs laufen wie Produktions-Jobs durch die Worker (Restore, Transcode, QC); Marathon sammelt die Reports ein, ändert aber weder `state/marathon.json` noch Dateien der Produktion.
@@ -545,7 +588,7 @@ python marathon.py test-qc
 
 ## Konfiguration (`res/config.ini`)
 
-Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pausiert Marathon, bis sie korrigiert ist. Änderungen in `[paths]` sowie an `reference_image` und `reference_clip_dir` pausieren Marathon bis zum Neustart oder zur Rücknahme; Änderungen in `[ingest]` und `[test]` gelten ohne Neustart.
+Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pausiert Marathon, bis sie korrigiert ist. Änderungen in `[paths]` sowie an `reference_image` und `reference_clip_dir` pausieren Marathon bis zum Neustart oder zur Rücknahme; Änderungen in `[ingest]`, `[ftp]` und `[test]` gelten ohne Neustart.
 
 | Abschnitt | Eintrag | Bedeutung |
 | --- | --- | --- |
@@ -577,6 +620,7 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 | ingest | master_dir | Ordner mit Masterdateien `<DEFA-ID>__<Titel>.<Endung>` (vollständiger Pfad, gleiches Netzlaufwerk wie `root_path`); `ingest-master` liest ihn, neue Master aus Transcode legt Marathon hier ab (ohne Überschreiben) |
 | ingest | proxy_dir | Ordner mit vorhandenen Proxys `<proxy_prefix>__<DEFA-ID>__<Titel>.mp4` (vollständiger Pfad, gleiches Netzlaufwerk wie `root_path`); nur `ingest-proxy` liest ihn |
 | ingest | proxy_prefix | Namensanfang der Proxys in `proxy_dir` (ohne das folgende `__`), z. B. `(c)PROGRESS__10Mbit` |
+| ftp | ftp_dir | Ziel von `send-to-ftp` (vollständiger Pfad), z. B. `\\10.0.77.102\FiMu 10 Mbit Proxy` |
 | test | test_file | Testliste im res-Ordner für `test` (z. B. `test_jobs.json`); wird bei jedem neuen Test-Lauf gelesen, muss erst dann vorhanden sein |
 
 ## Ausgaben
@@ -588,6 +632,7 @@ Alle Einträge sind Pflicht. Fehlt die Datei oder ist ein Eintrag fehlerhaft, pa
 - `reports/errors/<index|ffe>_<stempel>_ffe_uneindeutig.txt` – uneindeutige FFE-Treffer
 - `reports/errors/ingest-master_<stempel>_errors.txt` – nicht eingetragene Masterdateien und Hinweise von `ingest-master`
 - `reports/errors/ingest-proxy_<stempel>_errors.txt` – nicht übernommene Proxys und Hinweise von `ingest-proxy`
+- `reports/errors/send-to-ftp_<stempel>_errors.txt` – nicht gesendete Clips von `send-to-ftp`
 - `reports/details_<restore|transcode|qc>_<stempel>.txt` – Detailberichte, täglich nach dem Auto-Bericht
 - `reports/test_<stempel>.txt` – Testbericht eines Test-Laufs
 - `state/journal_<stufe>.jsonl` – Job-Protokoll seit dem letzten Detailbericht; danach in `state/journal/details_<stufe>_<stempel>.jsonl`

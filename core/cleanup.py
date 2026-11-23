@@ -12,7 +12,7 @@ from .config import cfg, state_path
 from .console import log
 from .util import context, now, stamp
 from .layout import check_root, final_folder, load_mapping, master_folder, qc_inbox, share_path
-from .share import ensured_folders, has_file, safe_work_path, subfolders, work_inventory
+from .share import ensured_folders, has_file, listing, safe_work_path, subfolders, work_inventory
 from .state import add_event, file_entry, keep_notes, load_state, position, save_state, set_issue
 from .naming import find_proxy
 from .ffe import is_reference
@@ -106,6 +106,7 @@ def _rebuild_process_state(state: dict) -> dict:
     """Keep index, metadata and history; rediscover remaining files without search, jobs or directory creation."""
     ctx = context()
     for clip in state["clips"].values():
+        ftp = clip.get("ftp") or {}
         previous, master = position(clip), clip["files"]["master"]
         ingested = master if master and master["source"] == ingest_source else None
         collection, clip_id = clip["collection"], clip["clip_id"]
@@ -113,7 +114,11 @@ def _rebuild_process_state(state: dict) -> dict:
         clip["files"] = {"master": None, "proxy": None}
         clip["issues"] = {"file": None, "sticky": None}
         places = ((final_folder(collection), "Zielordner"), (qc_inbox(collection), "QC-Eingang"))
-        proxy = next(((folder, name, source) for folder, source in places if (name := find_proxy(ctx, folder, clip))), None)
+        renamed = ftp.get("new_name") if ftp.get("renamed_at") else None
+        item = listing(ctx, final_folder(collection)).get(renamed.casefold()) if renamed else None
+        proxy = ((final_folder(collection), item[0], "Zielordner") if item and item[1] else
+                 next(((folder, name, source) for folder, source in places
+                       if (name := find_proxy(ctx, folder, clip))), None))
         missing = missing_masters(ctx, collection, clip_id, clip["master_files"])
         if missing is not None:
             clip["files"]["master"] = {"folder": master_folder(collection, clip_id),

@@ -4,7 +4,7 @@ import re
 import string
 from pathlib import Path
 
-from .constants import field_names, ingest_separator
+from .constants import field_names, ingest_separator, invalid_path_chars
 from .config import cfg
 from .share import listing
 
@@ -14,6 +14,15 @@ def proxy_name(clip: dict) -> str | None:
     """Proxy file name of a clip by proxy_name; None without Veritone-ID."""
     veritone_id = clip.get("veritone_id")
     return cfg["proxy_name"].format(veritone_id=veritone_id, clip_id=clip["clip_id"]) if veritone_id else None
+
+
+def ftp_name(clip: dict) -> str | None:
+    """New source name <001 Identifier>__<014 Title Original><proxy suffix>; None if identifier or title is empty."""
+    identifier, title = clip["identifier"].strip(), clip["title"].strip()
+    if not identifier or not title:
+        return None
+    clean = lambda value: "".join("_" if char in invalid_path_chars else char for char in value)
+    return f"{clean(identifier)}{ingest_separator}{clean(title)}{Path(cfg['proxy_name']).suffix}"
 
 
 def proxy_ids(name: str) -> tuple[str, str] | None:

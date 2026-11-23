@@ -33,6 +33,7 @@ config_schema = {  # section: {key: kind}; all values and their explanations liv
     "veritone": {"base_url": "text", "token_file": "text", "field_clip_id": "text"},
     "ffe": {"list_file": "text", "reference_image": "name", "reference_clip_dir": "name"},
     "ingest": {"keep_old_master": "bool", "master_dir": "text", "proxy_dir": "text", "proxy_prefix": "text"},
+    "ftp": {"ftp_dir": "text"},
     "test": {"test_file": "text"},
 }
 

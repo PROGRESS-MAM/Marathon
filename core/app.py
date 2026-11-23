@@ -22,6 +22,7 @@ from .cleanup import begin_delete, delete_folders
 from .report import report
 from .details import write_details
 from .ingest import ingest
+from .ftp import send_to_ftp
 from .retry import retry
 from .testrun import cancel_test, start_qc_test, start_restore_test, start_test, test_cycle, test_job_ids
 
@@ -209,6 +210,8 @@ def main(argv: list[str] | None = None) -> None:
                 update_ffe()
             elif command in ("ingest-master", "ingest-proxy"):
                 ingest(command.removeprefix("ingest-"))
+            elif command == "send-to-ftp":
+                send_to_ftp()
             else:
                 update_index()
             if command in ("run", "test", "test-qc", "test-restore", "test-cancel", "auto-report"):
