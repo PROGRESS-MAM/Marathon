@@ -13,7 +13,7 @@ from .console import log
 from .util import context, now, stamp
 from .layout import check_root, final_folder, load_mapping, master_folder, qc_inbox, share_path
 from .share import ensured_folders, has_file, listing, safe_work_path, subfolders, work_inventory
-from .state import add_event, file_entry, keep_notes, load_state, position, save_state, set_issue
+from .state import add_event, file_entry, ftp_record, keep_notes, load_state, position, save_state, set_issue
 from .naming import find_proxy
 from .ffe import is_reference
 from .audit import missing_masters, report_problem, status, update_activity
@@ -107,6 +107,8 @@ def _rebuild_process_state(state: dict) -> dict:
     ctx = context()
     for clip in state["clips"].values():
         ftp = clip.get("ftp") or {}
+        if "ftp" in clip:
+            ftp_record(clip)["job"] = None
         previous, master = position(clip), clip["files"]["master"]
         ingested = master if master and master["source"] == ingest_source else None
         collection, clip_id = clip["collection"], clip["clip_id"]

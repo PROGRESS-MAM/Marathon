@@ -82,3 +82,13 @@ def test_rebuild_renamed_missing_falls_back(tmp_path, monkeypatch):
 
     assert clip["ready"] is True
     assert clip["files"]["proxy"]["name"] == "1234567_98765_10Mbit.mp4"
+
+
+def test_rebuild_resets_ftp_job(tmp_path, monkeypatch):
+    ftp = {"job": {"id": "job-1"}, "requested_at": "t"}
+    state, clip = _state(tmp_path, monkeypatch, ftp)
+
+    cleanup._rebuild_process_state(state)
+
+    assert clip["ftp"]["job"] is None
+    assert clip["ftp"]["requested_at"] == "t"

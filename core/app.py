@@ -9,7 +9,7 @@ from . import app_name, app_version
 from .constants import commands_help
 from .config import cfg, load_config, reports_dir, state_path
 from .console import log
-from .util import context, now
+from .util import context, issue, now
 from .layout import acquire_lock, check_root, load_mapping, prepare
 from .share import ensure_folders
 from .state import keep_notes, load_state, save_state
@@ -17,6 +17,7 @@ from .priority import priority
 from .ffe import sync_references, update_ffe
 from .index import update_index
 from .jobs import process
+from .ftpjobs import ftp_cycle
 from .masters import cleanup_review
 from .cleanup import begin_delete, delete_folders
 from .report import report
@@ -40,6 +41,11 @@ def _cycle() -> str | None:
     ctx["checkpoint"] = lambda: save_state(state)
     cleanup_review(state, ctx)
     process(state, mapping, priority(mapping, state, ctx), ctx, writing=True, test_ids=test_job_ids())
+    # A failing FTP part must not lose the job loop's state changes.
+    try:
+        ftp_cycle(state, ctx)
+    except Exception as exc:
+        issue(ctx, "note", "FTP-Zyklus fehlgeschlagen – nächster Job-Zyklus versucht es erneut", "ftp", str(exc))
     keep_notes(state, ctx["issues"])
     state["updated_at"] = now()
     save_state(state)

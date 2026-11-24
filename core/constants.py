@@ -16,6 +16,7 @@ field_names = {
 }
 file_kinds = ("video", "audio", "data")  # Search fields with one file object per master file.
 stages = ("restore", "transcode", "qc")  # Also the stage folder names.
+ftp_stage, ftp_label = "ftp", "FTP"  # FTP job pool folder below work_dir and its label; no clip stage
 stage_labels = {"restore": "Restore", "transcode": "Transcode", "qc": "QC"}
 limit_keys = {stage: stage_labels[stage].casefold() for stage in stages if stage != "restore"}
 restore_kinds = {"gross": "restore_big_job", "klein": "restore_small_job"}  # Kind of a restore job: its [limits] key.
@@ -33,8 +34,8 @@ aqc_passed, aqc_actual_marker = "BESTANDEN", "Ist-Werte:"  # Tool status and inf
 blocked_outcome = "blockiert"  # Journal status of an ok report whose results Marathon could not move on.
 prio_columns = tuple(f"Prio {stage_labels[stage]}" for stage in stages)
 queue_columns = tuple(f"Queue {stage_labels[stage]}" for stage in stages)
-count_columns = ("Gesamt", "Bereit", *queue_columns)
-columns = ("Kollektion", *prio_columns, "Gesamt", "Bereit", "%", *queue_columns)
+count_columns = ("Gesamt", "Bereit", "FTP", *queue_columns)
+columns = ("Kollektion", *prio_columns, "Gesamt", "Bereit", "FTP", "%", *queue_columns)
 summary_name = "Summe"
 match_separator = "———"
 invalid_path_chars = frozenset('<>:"/\\|?*' + "".join(map(chr, range(32))))
@@ -49,6 +50,7 @@ issue_sections = {
     "inactive": "In der JSON, aber nicht aktiv (zählt weiter in Gesamt und in seiner Stufe)",
     "final": "Auffällige Clip-Dateien in finalen Ablageordnern",
     "editshare": f"EditShare-Feld nicht gesetzt (ab {editshare_attempts} gescheiterten Job-Zyklen; wird weiter versucht, Clip zählt als bereit)",
+    "ftp_error": "FTP nicht gesendet (letzter Stand je Clip; der nächste send-to-ftp nimmt sie wieder auf)",
     "note": "Hinweise (betroffene Clips zählen weiter)",
 }
 index_sections = ("skipped", "deviation", "veritone_only", "veritone_multi")
@@ -87,7 +89,7 @@ commands_help = {
     "update-ffe": "Nur FFE-Liste mit der bestehenden JSON abgleichen (ffe_tafel neu setzen), ohne Suche",
     "ingest-master": "Masterdateien aus master_dir über die DEFA-ID mit der JSON abgleichen und eintragen (nur manuell)",
     "ingest-proxy": "Proxys aus proxy_dir über die DEFA-ID abgleichen, umbenannt in den QC-Eingang verschieben (nur manuell)",
-    "send-to-ftp": "Bereite Clips nach letzter Prüfung (EditShare ∩ Veritone) nach ftp_dir kopieren, Quelle umbenennen, EditShare-Feld setzen (nur manuell)",
+    "send-to-ftp": "Bereite Clips nach letzter Prüfung (EditShare ∩ Veritone) für den FTP-Worker freigeben; Kopie, Umbenennen und EditShare-Feld in der Job-Schleife (nur manuell)",
     **{f"retry-{stage}": f"Alle inaktiven Clips der Stufe {stage_labels[stage]} wieder freigeben, Versuche auf 0 (ohne Bestätigung)"
        for stage in stages},
     "delete-folder": "SMB-Arbeitsordner bereinigen; Index behalten, Prozesszustand neu aufbauen",

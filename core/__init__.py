@@ -1,4 +1,4 @@
 """Marathon: index, job control and reports; started via marathon.py."""
 # --------- CONFIG ---------
 app_name = "Marathon"
-app_version = "1.19.0"
+app_version = "1.20.0"

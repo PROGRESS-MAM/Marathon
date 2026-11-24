@@ -6,7 +6,7 @@ from datetime import time
 from pathlib import Path
 
 from .constants import (
-    busy_suffixes, ffe_clip_suffix, ffe_share_keys, invalid_path_chars, limit_keys, restore_kinds, system_files)
+    busy_suffixes, ffe_clip_suffix, ffe_share_keys, ftp_stage, invalid_path_chars, limit_keys, restore_kinds, system_files)
 
 
 # --------- CONFIG ---------
@@ -27,7 +27,7 @@ config_schema = {  # section: {key: kind}; all values and their explanations liv
               "proxy_name": "pattern", "cred_file": "text", "mapping_file": "text", "priority_file": "text"},
     "operation": {"auto_report_time": "time", "retry_minutes": "number"},
     "timing": {"cycle_seconds": "number", "max_job_attempts": "number"},
-    "limits": {key: "count" for key in (*restore_kinds.values(), *limit_keys.values())},
+    "limits": {key: "count" for key in (*restore_kinds.values(), *limit_keys.values(), ftp_stage)},
     "restore": {"small_job_clips": "number"},
     "heartbeat": {"worker_timeout_minutes": "number", "max_job_hours": "number"},
     "veritone": {"base_url": "text", "token_file": "text", "field_clip_id": "text"},

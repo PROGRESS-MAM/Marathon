@@ -9,7 +9,7 @@ from . import app_name, app_version
 from .constants import columns, count_columns, index_labels, index_missing, index_sections, stages, summary_name
 from .config import error_dir, reports_dir, state_path
 from .console import log
-from .util import context, file_stamp, format_errors, issue, now, summary_lines, write_new
+from .util import clip_text, context, file_stamp, format_errors, issue, now, summary_lines, write_new
 from .layout import check_root, load_mapping
 from .state import load_state, save_state
 from .priority import priority
@@ -28,8 +28,20 @@ def _totals(state: dict, mapping: list[dict]) -> dict[str, tuple[int, ...]]:
         if row is None:
             continue
         row[0] += 1
-        row[1 if clip["ready"] else 2 + stages.index(clip["stage"])] += 1
+        row[1] += int(clip["ready"])
+        if (clip.get("ftp") or {}).get("copied_at"):
+            row[2] += 1
+        if not clip["ready"]:
+            row[3 + stages.index(clip["stage"])] += 1
     return {name: tuple(row) for name, row in totals.items()}
+
+
+def _ftp_issues(state: dict, ctx: dict) -> None:
+    for clip in state["clips"].values():
+        error = (clip.get("ftp") or {}).get("error")
+        if error:
+            issue(ctx, "ftp_error", error["category"], clip["clip_id"],
+                  f"{clip_text(clip)}: {error['detail']} (seit {error['at']})")
 
 
 def _previous(kind: str) -> Path | None:
@@ -71,7 +83,7 @@ def _render(kind: str, when: datetime, totals: dict, prio: dict[str, list[str]],
         if "%" in old:
             percent_text += f" ({round(round(percent, 1) - old['%'], 1) + 0.0:+.1f} pp)"  # + 0.0 avoids "-0.0".
         counts = [_format_int(value, old.get(column)) for column, value in zip(count_columns, values)]
-        rows.append((name, *(ranks[stage].get(name, "") for stage in stages), *counts[:2], percent_text, *counts[2:]))
+        rows.append((name, *(ranks[stage].get(name, "") for stage in stages), *counts[:3], percent_text, *counts[3:]))
     widths = [max(len(row[index]) for row in (columns, *rows)) for index in range(len(columns))]
 
     def line(cells) -> str:
@@ -114,6 +126,7 @@ def report(kind: str) -> Path:
     process(view, mapping, prio, ctx, writing=False)
     for clip in view["clips"].values():
         field_issue(clip, ctx)
+    _ftp_issues(view, ctx)
     ctx["listings"].clear()
     leftovers(view, mapping, ctx)
     final_audit(state, mapping, ctx)

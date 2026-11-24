@@ -27,6 +27,17 @@ def position(clip: dict) -> str:
     return text
 
 
+def ftp_record(clip: dict) -> dict:
+    """FTP entry of a clip with all keys; older entries (1.19.0) are completed in place."""
+    record = clip.setdefault("ftp", {})
+    for key, value in {
+        "requested_at": None, "job": None, "job_count": 0, "attempts": 0, "target": None, "size": None,
+        "old_name": None, "new_name": None, "copied_at": None, "renamed_at": None, "error": None,
+    }.items():
+        record.setdefault(key, value)
+    return record
+
+
 def add_event(clip: dict, event: str, detail: str = "") -> None:
     """Append an event to the clip history."""
     clip["history"].append({"at": now(), "event": event, "position": position(clip), "detail": detail})

@@ -43,8 +43,8 @@ def test_schema_and_command():
     assert config_schema["ftp"] == {"ftp_dir": "text"}
     assert list(config_schema).index("ftp") == list(config_schema).index("ingest") + 1
     assert commands_help["send-to-ftp"] == (
-        "Bereite Clips nach letzter Prüfung (EditShare ∩ Veritone) nach ftp_dir kopieren, "
-        "Quelle umbenennen, EditShare-Feld setzen (nur manuell)"
+        "Bereite Clips nach letzter Prüfung (EditShare ∩ Veritone) für den FTP-Worker freigeben; "
+        "Kopie, Umbenennen und EditShare-Feld in der Job-Schleife (nur manuell)"
     )
     assert list(commands_help).index("send-to-ftp") == list(commands_help).index("ingest-proxy") + 1
     assert ftp_sections == {"ftp_error": "Nicht gesendet (Fehler)"}
