@@ -2,7 +2,7 @@ import copy
 import importlib.util
 import sys
 import types
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 
 import pytest
 
@@ -230,24 +230,37 @@ def _main_setup(monkeypatch, tmp_path, report_text):
     return report, state, clip, skipped, proxy, saves
 
 
+def test_config_defaults():
+    assert reset_qc.apply is False
+    assert reset_qc.keep_categories == (3, 5)
+    assert PureWindowsPath(str(reset_qc.report_path)).name == "auswertung_qc.txt"
+    assert str(reset_qc.report_path).endswith(r"Auswertung Marathon\auswertung_qc.txt")
+
+
 def test_main_preview_changes_nothing(monkeypatch, tmp_path, capsys):
     report, state, clip, skipped, proxy, saves = _main_setup(monkeypatch, tmp_path, _report([(1, ["621226", "621227"]), (2, ["621228"])]))
+    monkeypatch.setattr(reset_qc, "report_path", report)
+    monkeypatch.setattr(reset_qc, "keep_categories", (2,))
+    monkeypatch.setattr(reset_qc, "apply", False)
     before = copy.deepcopy(state)
 
-    result = reset_qc.main([str(report), "--keep", "2"])
+    result = reset_qc.main()
 
     assert result == 0
     assert not saves
     assert proxy.is_file()
     assert state == before
-    assert "Vorschau – nichts geändert." in capsys.readouterr().out
+    assert "Vorschau – nichts geändert. Zum Ausführen apply = True im Config-Block setzen." in capsys.readouterr().out
 
 
 def test_main_apply(monkeypatch, tmp_path, capsys):
     report, state, clip, skipped, proxy, saves = _main_setup(monkeypatch, tmp_path, _report([(1, ["621226", "621227"]), (2, ["621228"])]))
+    monkeypatch.setattr(reset_qc, "report_path", report)
+    monkeypatch.setattr(reset_qc, "keep_categories", (2,))
+    monkeypatch.setattr(reset_qc, "apply", True)
     skipped_before = copy.deepcopy(skipped)
 
-    result = reset_qc.main([str(report), "--keep", "2", "--apply"])
+    result = reset_qc.main()
 
     assert result == 0
     assert len(saves) == 1
@@ -260,12 +273,15 @@ def test_main_apply(monkeypatch, tmp_path, capsys):
 def test_main_lock_busy(monkeypatch, tmp_path):
     report = tmp_path / "report.txt"
     report.write_text("", encoding="utf-8")
+    monkeypatch.setattr(reset_qc, "report_path", report)
+    monkeypatch.setattr(reset_qc, "keep_categories", (1,))
+    monkeypatch.setattr(reset_qc, "apply", True)
     monkeypatch.setattr(reset_qc, "load_config", lambda: None)
     monkeypatch.setattr(reset_qc, "acquire_lock", lambda: (_ for _ in ()).throw(RuntimeError("busy")))
     saves = []
     monkeypatch.setattr(reset_qc, "save_state", lambda value: saves.append(value))
 
-    assert reset_qc.main([str(report), "--keep", "1", "--apply"]) == 1
+    assert reset_qc.main() == 1
     assert not saves
 
 
@@ -325,9 +341,12 @@ def test_main_saves_state_after_reset_exception(monkeypatch, tmp_path, capsys):
     report, state, clip, skipped, proxy, saves = _main_setup(
         monkeypatch, tmp_path, _report([(1, ["621226"]), (2, ["621228"])])
     )
+    monkeypatch.setattr(reset_qc, "report_path", report)
+    monkeypatch.setattr(reset_qc, "keep_categories", (2,))
+    monkeypatch.setattr(reset_qc, "apply", True)
     monkeypatch.setattr(reset_qc, "stamp", lambda: (_ for _ in ()).throw(RuntimeError("clock failed")))
 
-    result = reset_qc.main([str(report), "--keep", "2", "--apply"])
+    result = reset_qc.main()
 
     assert result == 1
     assert len(saves) == 1

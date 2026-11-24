@@ -1,5 +1,4 @@
 # --------- IMPORTS ---------
-import argparse
 import re
 import sys
 from pathlib import Path
@@ -19,6 +18,9 @@ from core.util import clip_text, stamp
 # --------- CONFIG ---------
 app_name = "reset_qc"
 app_version = "1.0.0"
+report_path = Path(r"c:\Users\Martin\OneDrive - LOOKS Film & TV Produktionen GmbH\Desktop\Code\Runner\Auswertung Marathon\auswertung_qc.txt")
+keep_categories = (3, 5)  # Categories of the report that are not reset.
+apply = False  # False: preview only; True: delete proxies and save the JSON.
 category_pattern = re.compile(r"^\[(\d+)\] .+ \((\d+)\)$")
 case_pattern = re.compile(r"^  (\d+) · ")
 
@@ -140,13 +142,7 @@ def reset_clip(clip: dict, state: dict) -> tuple[bool, str]:
 
 
 # --------- MAIN ---------
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog=app_name)
-    parser.add_argument("report", help="Pfad zur QC-Auswertung")
-    parser.add_argument("--keep", type=int, nargs="+", required=True, help="Kategorien, die nicht zurückgesetzt werden")
-    parser.add_argument("--apply", action="store_true", help="Änderungen ausführen")
-    args = parser.parse_args(argv)
-
+def main() -> int:
     try:
         if reason := load_config():
             print(reason)
@@ -161,8 +157,8 @@ def main(argv: list[str] | None = None) -> int:
             print("Bereinigung noch unvollständig; zuerst 'delete-folder' erneut ausführen.")
             return 1
 
-        categories = parse_report(Path(args.report).read_text(encoding="utf-8-sig"))
-        keep = set(args.keep)
+        categories = parse_report(report_path.read_text(encoding="utf-8-sig"))
+        keep = set(keep_categories)
         clip_ids, kept = select_clips(categories, keep)
         reset, skips = plan_reset(state, clip_ids)
         print(f"Auswertung: {len(reset) + len(skips)} Clips zum Zurücksetzen ausgewählt, {len(kept)} bleiben (Kategorien {keep})")
@@ -172,8 +168,8 @@ def main(argv: list[str] | None = None) -> int:
             print("Übersprungen:")
             for clip_id, reason in skips:
                 print(f"  {clip_id}: {reason}")
-        if not args.apply:
-            print("Vorschau – nichts geändert. Zum Ausführen --apply anhängen.")
+        if not apply:
+            print("Vorschau – nichts geändert. Zum Ausführen apply = True im Config-Block setzen.")
             return 0
 
         changed = False
